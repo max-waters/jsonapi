@@ -133,16 +133,19 @@ func (r *resource) MarshalJSON() ([]byte, error) {
 	a := alias{
 		resourceIdentifier: r.resourceIdentifier,
 		Attributes:         r.Attributes,
-		Relationships:      make(map[string]any, len(r.ToOneRelationships)+len(r.ToManyRelationships)),
 		Links:              r.Links,
 		Meta:               r.Meta,
 	}
 
-	for k, v := range r.ToOneRelationships {
-		a.Relationships[k] = v
-	}
-	for k, v := range r.ToManyRelationships {
-		a.Relationships[k] = v
+	if len(r.ToOneRelationships)+len(r.ToManyRelationships) > 0 {
+		a.Relationships = make(map[string]any, len(r.ToOneRelationships)+len(r.ToManyRelationships))
+
+		for k, v := range r.ToOneRelationships {
+			a.Relationships[k] = v
+		}
+		for k, v := range r.ToManyRelationships {
+			a.Relationships[k] = v
+		}
 	}
 
 	return json.Marshal(a)
@@ -250,6 +253,7 @@ func format(a any, v reflect.Value, opts marshalResourceOpts) (resource, error) 
 	}
 
 	r := newResource()
+
 	for _, f := range fields {
 		if err := marshalField(v, &r, f); err != nil {
 			return resource{}, fmt.Errorf("marshaling field "+f.tag.name+": %w", err)
@@ -343,7 +347,7 @@ func deformat(v reflect.Value, r resource) error {
 
 	for _, f := range fields {
 		if err := unmarshalField(v, &r, f); err != nil {
-			return fmt.Errorf("jsonapi: unmarshaling field "+f.tag.name+": %w", err)
+			return fmt.Errorf("jsonapi: unmarshaling field '"+f.tag.name+"': %w", err)
 		}
 	}
 	return nil
@@ -626,7 +630,7 @@ type tag struct {
 	typ string
 	// The name that will appear in the output JSON.
 	name string
-	// The precendence of the name, with a jsonapi tag
+	// The precedence of the name, with a jsonapi tag
 	// name being the highest, then a json tag, then
 	// the declared field name
 	namePrec int
