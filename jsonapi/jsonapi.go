@@ -388,20 +388,32 @@ func unmarshalField(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
+// parseTags retrieves all attributes, relationships,
+// etc from the input value.
+//   - performs a breadth-first search over the value
+//     rooted at v
+//   - if a struct field is found with no value, the
+//     search continues over the type tree rooted at
+//     f's type
+//   - modelled on the equivalent function in the
+//     encoding/json package to reduce heap allocs
+//     (see issue #1)
 func parseTags(v reflect.Value) ([]field, error) {
-	type node struct {
+	// every element in the queue represents a
+	// struct, either a type or a value
+	type structElem struct {
 		t    reflect.Type
 		v    reflect.Value
-		ok   bool // true if the value is present
-		idxs []int
+		ok   bool  // true if the value is present
+		idxs []int // path to this structElem
 	}
 
 	var fields []field
 
 	types := map[reflect.Type]bool{}
 
-	next := []node{{t: v.Type(), v: v, ok: true}}
-	var current []node
+	next := []structElem{{t: v.Type(), v: v, ok: true}}
+	var current []structElem
 
 	// nb no allocations happen until needed
 	nextCount := map[reflect.Type]int{}
@@ -412,7 +424,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 		currentCount, nextCount = nextCount, currentCount
 		clear(nextCount)
 
-		// gather all fields
+		// count struct fields
 		nfs := 0
 		for _, c := range current {
 			nfs += c.t.NumField()
@@ -437,7 +449,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 			for i := 0; i < c.t.NumField(); i++ {
 				f := c.t.Field(i) // alloc (!)
 
-				typ, opts, ok := splitTypeAndOpts(f.Tag)
+				typ, opts, ok := splitTypeAndOpts(f)
 
 				fIdxs := make([]int, len(c.idxs)+1) // alloc
 				copy(fIdxs, c.idxs)
@@ -453,7 +465,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 							if fv.Kind() == reflect.Struct {
 								fvt := fv.Type()
-								next = append(next, node{fvt, fv, true, fIdxs}) // alloc
+								next = append(next, structElem{fvt, fv, true, fIdxs}) // alloc
 								nextCount[fvt] = nextCount[fvt] + 1
 								continue
 							}
@@ -469,7 +481,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 						// only have a type, no value. so explore the field's type
 						ft := derefType(f.Type)
 						if ft.Kind() == reflect.Struct {
-							next = append(next, node{ft, reflect.Value{}, false, fIdxs})
+							next = append(next, structElem{ft, reflect.Value{}, false, fIdxs})
 							nextCount[ft] = nextCount[ft] + 1
 						}
 
@@ -519,8 +531,11 @@ func parseTags(v reflect.Value) ([]field, error) {
 		return -cmp.Compare(a.tag.namePrec, b.tag.namePrec)
 	})
 
+	// now filter all fields that are overridden by those
+	// with a higher precedence
 	nFiltered := 0
 	for nType, i := 0, 0; i < len(fields); i += nType {
+		// find sublice of all fields of the same type
 		typ := fields[i].tag.typ
 		for nType = 1; i+nType < len(fields); nType++ {
 			if fields[i+nType].tag.typ != typ {
@@ -529,6 +544,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 		}
 
 		for nName, j := 0, i; j < i+nType; j += nName {
+			// find subslice of all fields with the same name (and type)
 			name := fields[j].tag.name
 			for nName = 1; j+nName < i+nType; nName++ {
 				if fields[j+nName].tag.name != name {
@@ -536,9 +552,11 @@ func parseTags(v reflect.Value) ([]field, error) {
 				}
 			}
 
-			field, ok := getDominantTag(fields[j : j+nName])
+			// if there are multiple with the same name and type,
+			// get the dominant field
+			field, ok := getDominantField(fields[j : j+nName])
 			if ok {
-				// copy back into original slice
+				// copy back into original slice to save allocs
 				fields[nFiltered] = field
 				nFiltered++
 			}
@@ -548,7 +566,12 @@ func parseTags(v reflect.Value) ([]field, error) {
 	return fields[:nFiltered], nil
 }
 
-func getDominantTag(fs []field) (field, bool) {
+// getDominantField returns the highest precedence
+// field from the supplied list, with (zero, false)
+// indicating a that no dominant tag can be determined.
+// Assumes that the input list items all have the same name and
+// type, and are sorted by depth then name precedence
+func getDominantField(fs []field) (field, bool) {
 	if len(fs) == 0 {
 		return field{}, false
 	}
@@ -557,10 +580,13 @@ func getDominantTag(fs []field) (field, bool) {
 		return fs[0], true
 	}
 
+	// if the two first items have the same depth and name prec then
+	// no dominant item can be determined
 	if len(fs[0].idxs) == len(fs[1].idxs) && fs[0].tag.namePrec == fs[1].tag.namePrec {
 		return field{}, false
 	}
 
+	// the first item must take precedence
 	return fs[0], true
 }
 
@@ -585,22 +611,38 @@ func parseTag(f reflect.StructField, typ string, opts string) (tag, error) {
 	}
 }
 
+// field represents the tags found on a
+// particular struct field, with tag reppresenting
+// the annotated tag, and idxs uniquely identifying
+// this field with its path from the top-level struct
 type field struct {
+	// the tag information annotated onto this struct field
 	tag tag
-	//sf   reflect.StructField
+	// idxs represents this and all ancestor fields' indexes
+	// within their parent structs
 	idxs []int
 }
 
+// tag represents a jsonapi struct tag
 type tag struct {
-	typ      string
-	name     string
+	// The jsonapi tag type, eg attribute, relationship etc
+	typ string
+	// The name that will appear in the output JSON.
+	name string
+	// The precendence of the name, with a jsonapi tag
+	// name being the highest, then a json tag, then
+	// the declared field name
 	namePrec int
-	rscType  string
-	// opts
-	quote     bool
+	// If this typ is relationship or id, this field
+	// defines the resource type
+	rscType string
+	// whether the "string" flag was specified
+	quote bool
+	// whether the "omitempty" flag was specified
 	omitempty bool
 }
 
+// parseIdTag parses an id tag, eg `jsonapi:"id,name,type,opt1,opt2..."`
 func parseIdTag(f reflect.StructField, opts string) (tag, error) {
 	rscType, opts := splitFirstAndOpts(opts)
 	if rscType == "" {
@@ -659,6 +701,7 @@ func unmarshalId(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
+// parseAttrTag parses an attribute tag, eg `jsonapi:"attr,name,opt1,opt2..."`
 func parseAttrTag(f reflect.StructField, opts string) (tag, error) {
 	name, namePrec, opts := splitNameAndOpts(f, opts)
 	omitempty, quote := optFlags(opts)
@@ -713,7 +756,7 @@ func unmarshalAttr(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
-// rel,name,type,opt1,opt2,...
+// parseRelTag parses a relationship tag, eg `jsonapi:"rel,name,type,opt1,opt2..."`
 func parseRelTag(f reflect.StructField, opts string) (tag, error) {
 	name, namePrec, opts := splitNameAndOpts(f, opts)
 	rscType, opts := splitFirstAndOpts(opts)
@@ -856,11 +899,15 @@ func unmarshalToManyRel(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
+// isToOne returns whether the supplied value
+// represents a to-one or to-many relationship.
+// A to-many relationship must be an array, or a slice
+// of anything that is not a byte.
 func isToOne(fv reflect.Value) bool {
 	return fv.Kind() != reflect.Array && (fv.Kind() != reflect.Slice || fv.Type().Elem().Kind() == reflect.Uint8)
 }
 
-// meta,name,opt1,opt2,...
+// parseMetaTag parses a meta tag, eg `jsonapi:"meta,name,opt1,opt2..."`
 func parseMetaTag(f reflect.StructField, opts string) (tag, error) {
 	name, namePrec, opts := splitNameAndOpts(f, opts)
 	omitempty, quote := optFlags(opts)
@@ -913,8 +960,12 @@ func unmarshalMeta(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
-func splitTypeAndOpts(tag reflect.StructTag) (string, string, bool) {
-	value, ok := tag.Lookup(TagKeyJsonApi)
+// splitTypeAndOpts extracts the jsonapi tag value from the supplied tag
+// and returns the type string and all remaining options. The bool represents
+// whether a tag was found.
+// Eg `jsonapi:"attr,name,omitempty"` returns ("attribute", "name,omitempty", true )
+func splitTypeAndOpts(f reflect.StructField) (string, string, bool) {
+	value, ok := f.Tag.Lookup(TagKeyJsonApi)
 	if !ok {
 		return "", "", false
 	}
@@ -923,6 +974,14 @@ func splitTypeAndOpts(tag reflect.StructTag) (string, string, bool) {
 	return typ, opts, true
 }
 
+// splitNameAndOpts extracts the name and precedence from the supplied
+// field and tag options. It returns the name, the name's precedence, and the
+// remaining options.
+// NB assumes that the opts string does not contain the type.
+// If the opts string contains a declared name, then it is returned with
+// precedence 3. If there is no declared name but there is a decalred json
+// name, that is returned with precedence 2. Otherwise the field name is returned
+// with precedence 1.
 func splitNameAndOpts(f reflect.StructField, opts string) (string, int, string) {
 	name, opts := splitFirstAndOpts(opts)
 	if name != "" {
@@ -937,11 +996,15 @@ func splitNameAndOpts(f reflect.StructField, opts string) (string, int, string) 
 	return f.Name, 1, opts
 }
 
+// splitFirstAndOpts extracts the first opt from the opts list.
+// Returns the extracted opt and all remaining opts.
 func splitFirstAndOpts(opts string) (string, string) {
 	fst, opts, _ := strings.Cut(opts, ",")
 	return fst, opts
 }
 
+// optFlags gets the values of the omitempty and
+// string flags from the supplied opts.
 func optFlags(opts string) (bool, bool) {
 	omitempty := false
 	quote := false
@@ -1071,6 +1134,10 @@ func isEmpty(v reflect.Value) bool {
 	}
 }
 
+// derefInput returns either:
+// - the underlying value of v, found by following all pointers, or
+// - an instance of type t, if one of the dereferenced values implements it.
+// An error is returned if a loop of self-referential pointers is found.
 func derefInput(v reflect.Value, t reflect.Type) (reflect.Value, error) {
 	u := v
 	for {
@@ -1087,6 +1154,10 @@ func derefInput(v reflect.Value, t reflect.Type) (reflect.Value, error) {
 	}
 }
 
+// fieldByIndex returns the value found by following the nested
+// struct fields defined by the supplied indexes.
+// It assumes that every value on the path is either a struct
+// or a pointer to a struct.
 func fieldByIndex(v reflect.Value, idxs []int) (reflect.Value, error) {
 	var err error
 	for _, idx := range idxs {
@@ -1100,6 +1171,10 @@ func fieldByIndex(v reflect.Value, idxs []int) (reflect.Value, error) {
 	return v, nil
 }
 
+// initFieldByIndex initialises all values in the nested
+// struct fields defined by the supplied indexes.
+// It assumes that all but the final value on the path is either a struct
+// or a pointer to a struct.
 func initFieldByIndex(v reflect.Value, idxs []int) (reflect.Value, error) {
 	var err error
 	for _, idx := range idxs {
@@ -1114,6 +1189,9 @@ func initFieldByIndex(v reflect.Value, idxs []int) (reflect.Value, error) {
 	return v, nil
 }
 
+// initValue initialises v's underlying value, found by following
+// all pointers, to its zero value.
+// If v is a chain of pointers, they will initialised too.
 func initValue(v reflect.Value) {
 	for {
 		if v.Kind() != reflect.Pointer || !v.IsNil() {
