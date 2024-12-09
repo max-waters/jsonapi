@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unsafe"
 
 	"reflect"
 	"slices"
@@ -1150,18 +1151,22 @@ func isEmpty(v reflect.Value) bool {
 // - an instance of type t, if one of the dereferenced values implements it.
 // An error is returned if a loop of self-referential pointers is found.
 func derefInput(v reflect.Value, t reflect.Type) (reflect.Value, error) {
-	u := v
+	path := map[unsafe.Pointer]bool{}
 	for {
 		if v.Type().Implements(t) || (v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface) {
 			return v, nil
 		}
 
-		v = v.Elem()
-
 		// check for a loop of self-referential pointers
-		if u == v {
-			return reflect.Value{}, ErrSelfRefPtr
+		if v.Kind() == reflect.Pointer {
+			ptr := v.UnsafePointer()
+			if path[ptr] {
+				return reflect.Value{}, ErrSelfRefPtr
+			}
+			path[ptr] = true
 		}
+
+		v = v.Elem()
 	}
 }
 
@@ -1231,18 +1236,22 @@ func initValue(v reflect.Value) {
 // derefValue returns the value of v after following all pointers,
 // or an error if a cycle of pointers is detected.
 func derefValue(v reflect.Value) (reflect.Value, error) {
-	u := v
+	path := map[unsafe.Pointer]bool{}
 	for {
 		if v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface {
 			return v, nil
 		}
 
-		v = v.Elem()
-
 		// check for a loop of self-referential pointers
-		if u == v {
-			return reflect.Value{}, ErrSelfRefPtr
+		if v.Kind() == reflect.Pointer {
+			ptr := v.UnsafePointer()
+			if path[ptr] {
+				return reflect.Value{}, ErrSelfRefPtr
+			}
+			path[ptr] = true
 		}
+
+		v = v.Elem()
 	}
 }
 
