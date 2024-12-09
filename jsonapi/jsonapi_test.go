@@ -3,6 +3,7 @@ package jsonapi
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2606,6 +2607,292 @@ func TestUnmarshalResource_StringTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, stringTagValue, got)
+}
+
+func TestSplitTypeAndOpts(t *testing.T) {
+	type testType struct {
+		I int `jsonapi:"attr,name,omitempty"`
+		J int `jsonapi:"attr"`
+		K int
+	}
+
+	typ := reflect.TypeOf(testType{})
+
+	type testCase struct {
+		Field   reflect.StructField
+		ExpType string
+		ExpOpts string
+		ExpOk   bool
+	}
+
+	testCases := []testCase{
+		{typ.Field(0), "attr", "name,omitempty", true},
+		{typ.Field(1), "attr", "", true},
+		{typ.Field(2), "", "", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Field.Name, func(t *testing.T) {
+			typStr, opts, ok := splitTypeAndOpts(tc.Field)
+			assert.Equal(t, tc.ExpType, typStr)
+			assert.Equal(t, tc.ExpOpts, opts)
+			assert.Equal(t, tc.ExpOk, ok)
+		})
+	}
+}
+
+func TestSplitNameAndOpts(t *testing.T) {
+	type testType struct {
+		I int `json:"i"`
+		J int
+	}
+
+	typ := reflect.TypeOf(testType{})
+
+	type testCase struct {
+		Field   reflect.StructField
+		Opts    string
+		ExpName string
+		ExpPrec int
+		ExpOpts string
+	}
+
+	testCases := []testCase{
+		{typ.Field(0), "name,omitempty", "name", 3, "omitempty"},
+		{typ.Field(0), "name", "name", 3, ""},
+		// defaults to json name
+		{typ.Field(0), ",omitempty", "i", 2, "omitempty"},
+		// no json tag, defaults to field name
+		{typ.Field(1), ",omitempty", "J", 1, "omitempty"},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			name, prec, opts := splitNameAndOpts(tc.Field, tc.Opts)
+			assert.Equal(t, tc.ExpName, name)
+			assert.Equal(t, tc.ExpPrec, prec)
+			assert.Equal(t, tc.ExpOpts, opts)
+		})
+	}
+}
+
+func TestOptFlags(t *testing.T) {
+	type testCase struct {
+		In           string
+		ExpOmitEmpty bool
+		ExpString    bool
+	}
+
+	testCases := []testCase{
+		{"omitempty,string", true, true},
+		{"blah,omitempty,string,blah", true, true},
+		{"blah,blah", false, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.In, func(t *testing.T) {
+			omitempty, quote := optFlags(tc.In)
+			assert.Equal(t, omitempty, tc.ExpOmitEmpty)
+			assert.Equal(t, quote, tc.ExpString)
+		})
+	}
+}
+
+func TestDerefInput(t *testing.T) {
+	type testType struct {
+		I int
+	}
+
+	type testCase struct {
+		In  any
+		Exp any
+	}
+
+	testIn := testType{
+		I: 1,
+	}
+
+	testImpl := formatMarshalUnmarshaler{
+		I: 1,
+	}
+
+	testCases := []testCase{
+		{addrOf(addrOf(testIn)), testIn},             // returns value
+		{addrOf(addrOf(testImpl)), addrOf(testImpl)}, // returns ptr to value, as implementation funcs have ptr receivers
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			got, err := derefInput(reflect.ValueOf(tc.In), resourceUnmarshalerType)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.Exp, got.Interface())
+		})
+	}
+}
+
+func TestFieldByIndex(t *testing.T) {
+	type anonTestType struct {
+		I int
+	}
+
+	type innerTestType struct {
+		J int
+	}
+
+	type testType struct {
+		*anonTestType
+		S *innerTestType
+		K int
+	}
+
+	in := reflect.ValueOf(&testType{
+		anonTestType: &anonTestType{
+			I: 1,
+		},
+		S: &innerTestType{
+			J: 2,
+		},
+		K: 3,
+	})
+
+	type testCase struct {
+		Idxs []int
+		Exp  int
+	}
+
+	testCases := []*testCase{
+		{[]int{0, 0}, 1},
+		{[]int{1, 0}, 2},
+		{[]int{2}, 3},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			got, err := fieldByIndex(in, tc.Idxs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.Exp, got.Interface())
+		})
+	}
+}
+
+func TestInitFieldByIndex(t *testing.T) {
+	type AnonTestType struct {
+		I int
+	}
+
+	type innerTestType struct {
+		J int
+	}
+
+	type testType struct {
+		*AnonTestType
+		S *innerTestType
+		K int
+	}
+
+	in := &testType{}
+	got, err := initFieldByIndex(reflect.ValueOf(in), []int{0, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 0, got.Interface())
+	assert.NotNil(t, in.AnonTestType)
+
+	in = &testType{}
+	got, err = initFieldByIndex(reflect.ValueOf(in), []int{1, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 0, got.Interface())
+	assert.NotNil(t, in.S)
+
+}
+
+func TestInitValue(t *testing.T) {
+	type testCase struct {
+		In  any
+		Exp any
+	}
+
+	var f interface{}
+
+	var i *int
+
+	// self-ref ptrs
+	var p any
+	q := &p
+	r := &q
+	p = &r
+
+	// struct type
+	type testType struct {
+		I *int
+	}
+	var tt *testType
+
+	testCases := []testCase{
+		{
+			In:  &f,
+			Exp: &f,
+		},
+		{
+			In:  &i,
+			Exp: addrOf(addrOf(0)),
+		},
+		{
+			In:  &tt,
+			Exp: addrOf(&testType{}),
+		},
+		{
+			// should be unchanged
+			In:  &p,
+			Exp: &p,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			v := reflect.ValueOf(tc.In)
+			initValue(v)
+			assert.Equal(t, tc.Exp, v.Interface())
+		})
+	}
+}
+
+func TestDerefValue(t *testing.T) {
+	type testCase struct {
+		In     any
+		Exp    any
+		ExpErr bool
+	}
+
+	var selfRef any
+	selfRef = &selfRef
+	var ptrToSelfRef = &selfRef
+	var ptrToPtrToSelfRef = &ptrToSelfRef
+
+	testCases := []testCase{
+		{addrOf(addrOf(4)), 4, false},
+		{selfRef, nil, true},
+		{ptrToPtrToSelfRef, nil, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			got, err := derefValue(reflect.ValueOf(tc.In))
+			if tc.ExpErr {
+				assert.Equal(t, ErrSelfRefPtr, err)
+				return
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.Exp, got.Interface())
+		})
+	}
 }
 
 func fmtJson(t *testing.T, data []byte) string {
