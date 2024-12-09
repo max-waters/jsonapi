@@ -3,6 +3,7 @@ package jsonapi
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2617,6 +2618,154 @@ func TestUnmarshalResource_StringTag(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert.Equal(t, stringTagValue, got)
+}
+
+func TestSplitTypeAndOpts(t *testing.T) {
+	type testType struct {
+		I int `jsonapi:"attr,name,omitempty"`
+		J int `jsonapi:"attr"`
+		K int
+	}
+
+	typ := reflect.TypeOf(testType{})
+
+	type testCase struct {
+		Field   reflect.StructField
+		ExpType string
+		ExpOpts string
+		ExpOk   bool
+	}
+
+	testCases := []testCase{
+		{typ.Field(0), "attr", "name,omitempty", true},
+		{typ.Field(1), "attr", "", true},
+		{typ.Field(2), "", "", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Field.Name, func(t *testing.T) {
+			typStr, opts, ok := splitTypeAndOpts(tc.Field.Tag)
+			assert.Equal(t, tc.ExpType, typStr)
+			assert.Equal(t, tc.ExpOpts, opts)
+			assert.Equal(t, tc.ExpOk, ok)
+		})
+	}
+}
+
+func TestSplitNameAndOpts(t *testing.T) {
+	type testType struct {
+		I int `json:"i"`
+		J int
+	}
+
+	typ := reflect.TypeOf(testType{})
+
+	type testCase struct {
+		Field   reflect.StructField
+		Opts    string
+		ExpName string
+		ExpPrec int
+		ExpOpts string
+	}
+
+	testCases := []testCase{
+		{typ.Field(0), "name,omitempty", "name", 3, "omitempty"},
+		{typ.Field(0), "name", "name", 3, ""},
+		// defaults to json name
+		{typ.Field(0), ",omitempty", "i", 2, "omitempty"},
+		// no json tag, defaults to field name
+		{typ.Field(1), ",omitempty", "J", 1, "omitempty"},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			name, prec, opts := splitNameAndOpts(tc.Field, tc.Opts)
+			assert.Equal(t, tc.ExpName, name)
+			assert.Equal(t, tc.ExpPrec, prec)
+			assert.Equal(t, tc.ExpOpts, opts)
+		})
+	}
+}
+
+func TestOptFlags(t *testing.T) {
+	type testCase struct {
+		In           string
+		ExpOmitEmpty bool
+		ExpString    bool
+	}
+
+	testCases := []testCase{
+		{"omitempty,string", true, true},
+		{"blah,omitempty,string,blah", true, true},
+		{"blah,blah", false, false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.In, func(t *testing.T) {
+			omitempty, quote := optFlags(tc.In)
+			assert.Equal(t, omitempty, tc.ExpOmitEmpty)
+			assert.Equal(t, quote, tc.ExpString)
+		})
+	}
+}
+
+func TestInitValue(t *testing.T) {
+
+	type testCase struct {
+		In  reflect.Value
+		Exp any
+	}
+
+	var intPtr *int = addrOf(0)
+
+	testCases := []testCase{
+		{
+			In:  reflect.ValueOf(*intPtr),
+			Exp: addrOf(0),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			if !tc.In.CanAddr() {
+				t.Fatalf("unaddressable test value %+v", tc.In)
+			}
+			initValue(tc.In)
+			assert.Equal(t, tc.Exp, tc.In.Interface())
+		})
+	}
+}
+
+func TestDerefValue(t *testing.T) {
+	type testCase struct {
+		In     any
+		Exp    any
+		ExpErr bool
+	}
+
+	var selfRef any
+	selfRef = &selfRef
+	var ptrToSelfRef = &selfRef
+	var ptrToPtrToSelfRef = &ptrToSelfRef
+
+	testCases := []testCase{
+		{addrOf(addrOf(4)), 4, false},
+		{selfRef, nil, true},
+		{ptrToPtrToSelfRef, nil, true},
+	}
+
+	for _, tc := range testCases {
+		t.Run("", func(t *testing.T) {
+			got, err := derefValue(reflect.ValueOf(tc.In))
+			if tc.ExpErr {
+				assert.Equal(t, err, ErrSelfRefPtr)
+				return
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			assert.Equal(t, tc.Exp, got.Interface())
+		})
+	}
 }
 
 func fmtJson(t *testing.T, data []byte) string {
