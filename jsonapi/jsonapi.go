@@ -3,6 +3,7 @@ package jsonapi
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"reflect"
@@ -303,7 +304,7 @@ func marshalField(v reflect.Value, r *Resource, f field) error {
 	case TagValueMeta:
 		return marshalMeta(v, r, f)
 	}
-	return fmt.Errorf("unknown tag type " + f.tag.typ)
+	return errors.New("unknown tag type " + f.tag.typ)
 }
 
 func DeformatResource(r *Resource, a any) error {
@@ -581,7 +582,7 @@ func parseTag(f reflect.StructField, typ string, opts string) (tag, error) {
 	case TagValueRel:
 		return parseRelTag(f, opts)
 	default:
-		return tag{}, &TagErr{f.Name, fmt.Errorf("unknown tag type: " + typ)}
+		return tag{}, &TagErr{f.Name, errors.New("unknown tag type: " + typ)}
 	}
 }
 

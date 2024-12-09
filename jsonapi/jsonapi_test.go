@@ -1690,7 +1690,7 @@ type PromotionPrecedence2 struct {
 
 type promotionPrecedence struct {
 	PromotionPrecedence1
-	PromotionPrecedence2
+	PromotionPrecedence2 //nolint:govet // ignore the lint error, as we're testing this
 }
 
 var promotionPrecedenceMarshalValue = promotionPrecedence{
