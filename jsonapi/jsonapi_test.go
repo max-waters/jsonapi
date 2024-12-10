@@ -2238,25 +2238,16 @@ func TestUnmarshalResource_TypeCycle(t *testing.T) {
 }
 
 type mapMarshalUnmarshaler struct {
-	Id            string
-	Attributes    map[string]interface{}
-	Meta          map[string]interface{}
-	Relationships map[string]interface{}
+	Id            string                 `jsonapi:"id,type"`
+	Attributes    map[string]interface{} `jsonapi:"-"`
+	Meta          map[string]interface{} `jsonapi:"-"`
+	Relationships map[string]interface{} `jsonapi:"-"`
 }
 
 func (m *mapMarshalUnmarshaler) MarshalJsonApiResource() ([]byte, error) {
-	j, err := json.Marshal(m.Id)
+	r, err := FormatResource(m)
 	if err != nil {
 		return nil, err
-	}
-	r := &Resource{
-		ResourceIdentifier: ResourceIdentifier{
-			Type: "type",
-			Id:   json.RawMessage(j),
-			Meta: map[string]json.RawMessage{},
-		},
-		Attributes:         map[string]json.RawMessage{},
-		ToOneRelationships: map[string]*ToOneResourceLinkage{},
 	}
 
 	for k, v := range m.Attributes {
@@ -2292,14 +2283,12 @@ func (m *mapMarshalUnmarshaler) MarshalJsonApiResource() ([]byte, error) {
 }
 
 func (m *mapMarshalUnmarshaler) UnmarshalJsonApiResource(data []byte) error {
-	r := Resource{
-		Attributes: map[string]json.RawMessage{},
-	}
-	if err := json.Unmarshal(data, &r); err != nil {
+	r := &Resource{}
+	if err := json.Unmarshal(data, r); err != nil {
 		return err
 	}
 
-	if err := json.Unmarshal(r.ResourceIdentifier.Id, &m.Id); err != nil {
+	if err := DeformatResource(r, m); err != nil {
 		return err
 	}
 
