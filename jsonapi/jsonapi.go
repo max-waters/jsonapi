@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"unsafe"
 
 	"reflect"
 	"slices"
@@ -1150,18 +1151,22 @@ func isEmpty(v reflect.Value) bool {
 // - an instance of type t, if one of the dereferenced values implements it.
 // An error is returned if a loop of self-referential pointers is found.
 func derefInput(v reflect.Value, t reflect.Type) (reflect.Value, error) {
-	u := v
+	path := map[unsafe.Pointer]bool{}
 	for {
 		if v.Type().Implements(t) || (v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface) {
 			return v, nil
 		}
 
-		v = v.Elem()
-
 		// check for a loop of self-referential pointers
-		if u == v {
-			return reflect.Value{}, ErrSelfRefPtr
+		if v.Kind() == reflect.Pointer {
+			ptr := v.UnsafePointer()
+			if path[ptr] {
+				return reflect.Value{}, ErrSelfRefPtr
+			}
+			path[ptr] = true
 		}
+
+		v = v.Elem()
 	}
 }
 
@@ -1205,9 +1210,16 @@ func initFieldByIndex(v reflect.Value, idxs []int) (reflect.Value, error) {
 // initValue initialises v's underlying value, found by following
 // all pointers, to its zero value.
 // Any required pointers will also be initialised.
+// NB if a self-referential pointer loop is discovered, the
+// function returns immediately without error.
 func initValue(v reflect.Value) {
+	path := map[unsafe.Pointer]bool{}
 	for {
-		if v.Kind() != reflect.Pointer || !v.IsNil() {
+		if v.Kind() == reflect.Interface {
+			v = v.Elem()
+			continue
+		}
+		if v.Kind() != reflect.Pointer {
 			return
 		}
 
@@ -1217,32 +1229,38 @@ func initValue(v reflect.Value) {
 		// }
 		// s := t{}
 		// s.v = &s.v
-		if v.Elem().Kind() == reflect.Interface && v.Elem().Elem() == v {
+		ptr := v.UnsafePointer()
+		if path[ptr] {
 			return
 		}
+		path[ptr] = true
 
 		if v.IsNil() {
 			v.Set(reflect.New(v.Type().Elem()))
-			v = v.Elem()
 		}
+		v = v.Elem()
 	}
 }
 
 // derefValue returns the value of v after following all pointers,
 // or an error if a cycle of pointers is detected.
 func derefValue(v reflect.Value) (reflect.Value, error) {
-	u := v
+	path := map[unsafe.Pointer]bool{}
 	for {
 		if v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface {
 			return v, nil
 		}
 
-		v = v.Elem()
-
 		// check for a loop of self-referential pointers
-		if u == v {
-			return reflect.Value{}, ErrSelfRefPtr
+		if v.Kind() == reflect.Pointer {
+			ptr := v.UnsafePointer()
+			if path[ptr] {
+				return reflect.Value{}, ErrSelfRefPtr
+			}
+			path[ptr] = true
 		}
+
+		v = v.Elem()
 	}
 }
 
