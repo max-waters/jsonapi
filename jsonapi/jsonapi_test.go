@@ -2272,7 +2272,7 @@ func (m *mapMarshalUnmarshaler) MarshalJsonApiResource() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		r.ToOneRelationships[k] = &ToOneResourceLinkage{
+		r.ToOneRelationships[k] = &ToOneRelationship{
 			Data: ResourceIdentifier{
 				Type: "rel-type",
 				Id:   json.RawMessage(j),

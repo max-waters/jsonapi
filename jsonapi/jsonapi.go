@@ -85,18 +85,17 @@ var (
 )
 
 type ResourceIdentifier struct {
-	Type string                     `json:"type,omitempty"`
-	Id   json.RawMessage            `json:"id,omitempty"`
-	Meta map[string]json.RawMessage `json:"meta,omitempty"`
+	Type string          `json:"type,omitempty"`
+	Id   json.RawMessage `json:"id,omitempty"`
 }
 
 type LinkObject struct {
-	Href        string                 `json:"href"`
-	DescribedBy *Link                  `json:"described_by,omitempty"`
-	Title       string                 `json:"title,omitempty"`
-	Type        string                 `json:"type,omitempty"`
-	HrefLang    []string               `json:"hreflang,omitempty"`
-	Meta        map[string]interface{} `json:"meta,omitempty"`
+	Href        string         `json:"href"`
+	DescribedBy *Link          `json:"described_by,omitempty"`
+	Title       string         `json:"title,omitempty"`
+	Type        string         `json:"type,omitempty"`
+	HrefLang    []string       `json:"hreflang,omitempty"`
+	Meta        map[string]any `json:"meta,omitempty"`
 }
 
 type Link struct {
@@ -122,34 +121,34 @@ func (l *Link) UnmarshalJSON(data []byte) error {
 	}
 }
 
-type ToOneResourceLinkage struct {
+type ToOneRelationship struct {
+	Data  ResourceIdentifier         `json:"data,omitempty"`
 	Links map[string]*Link           `json:"links,omitempty"`
 	Meta  map[string]json.RawMessage `json:"meta,omitempty"`
-	Data  ResourceIdentifier         `json:"data"`
 }
 
-type ToManyResourceLinkage struct {
+type ToManyRelationship struct {
+	Data  []ResourceIdentifier       `json:"data,omitempty"`
 	Links map[string]*Link           `json:"links,omitempty"`
 	Meta  map[string]json.RawMessage `json:"meta,omitempty"`
-	Data  []ResourceIdentifier       `json:"data"`
 }
 
 type Resource struct {
 	ResourceIdentifier
 	Attributes          map[string]json.RawMessage
-	ToOneRelationships  map[string]*ToOneResourceLinkage
-	ToManyRelationships map[string]*ToManyResourceLinkage
+	ToOneRelationships  map[string]*ToOneRelationship
+	ToManyRelationships map[string]*ToManyRelationship
 	Links               map[string]*Link
+	Meta                map[string]json.RawMessage
 }
 
 func newResource() Resource {
 	return Resource{
-		ResourceIdentifier: ResourceIdentifier{
-			Meta: map[string]json.RawMessage{},
-		},
+		ResourceIdentifier:  ResourceIdentifier{},
 		Attributes:          map[string]json.RawMessage{},
-		ToOneRelationships:  map[string]*ToOneResourceLinkage{},
-		ToManyRelationships: map[string]*ToManyResourceLinkage{},
+		ToOneRelationships:  map[string]*ToOneRelationship{},
+		ToManyRelationships: map[string]*ToManyRelationship{},
+		Meta:                map[string]json.RawMessage{},
 	}
 }
 
@@ -159,12 +158,14 @@ func (r *Resource) MarshalJSON() ([]byte, error) {
 		Attributes    map[string]json.RawMessage `json:"attributes,omitempty"`
 		Relationships map[string]any             `json:"relationships,omitempty"`
 		Links         map[string]*Link           `json:"links,omitempty"`
+		Meta          map[string]json.RawMessage `json:"meta,omitempty"`
 	}
 	a := alias{
 		ResourceIdentifier: r.ResourceIdentifier,
 		Attributes:         r.Attributes,
 		Relationships:      make(map[string]any, len(r.ToOneRelationships)+len(r.ToManyRelationships)),
 		Links:              r.Links,
+		Meta:               r.Meta,
 	}
 
 	for k, v := range r.ToOneRelationships {
@@ -189,6 +190,7 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 		Attributes    map[string]json.RawMessage `json:"attributes"`
 		Relationships map[string]relAlias        `json:"relationships"`
 		Links         map[string]*Link           `json:"links"`
+		Meta          map[string]json.RawMessage `json:"meta"`
 	}
 
 	a := alias{}
@@ -200,8 +202,9 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 	r.ResourceIdentifier = a.ResourceIdentifier
 	r.Attributes = a.Attributes
 	r.Links = a.Links
-	r.ToOneRelationships = map[string]*ToOneResourceLinkage{}
-	r.ToManyRelationships = map[string]*ToManyResourceLinkage{}
+	r.Meta = a.Meta
+	r.ToOneRelationships = map[string]*ToOneRelationship{}
+	r.ToManyRelationships = map[string]*ToManyRelationship{}
 
 	for name, rel := range a.Relationships {
 		switch rel.Data[0] {
@@ -210,7 +213,7 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 			if err := json.Unmarshal(rel.Data, &ids); err != nil {
 				return err
 			}
-			r.ToManyRelationships[name] = &ToManyResourceLinkage{
+			r.ToManyRelationships[name] = &ToManyRelationship{
 				Meta:  rel.Meta,
 				Data:  ids,
 				Links: rel.Links,
@@ -220,7 +223,7 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 			if err := json.Unmarshal(rel.Data, &id); err != nil {
 				return err
 			}
-			r.ToOneRelationships[name] = &ToOneResourceLinkage{
+			r.ToOneRelationships[name] = &ToOneRelationship{
 				Meta:  rel.Meta,
 				Data:  id,
 				Links: rel.Links,
@@ -233,32 +236,45 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func FormatResource(a any) (*Resource, error) {
+type formatResourceOpts struct {
+	resourceLinksFmt           func(r ResourceIdentifier) (map[string]*Link, error)
+	toOneRelationshipLinksFmt  func(rsc ResourceIdentifier, rel string, data ResourceIdentifier) (map[string]*Link, error)
+	toManyRelationshipLinksFmt func(rsc ResourceIdentifier, rel string, data []ResourceIdentifier) (map[string]*Link, error)
+}
+
+type formatResourceOpt func(opts formatResourceOpts) formatResourceOpts
+
+func WithResourceLinksFormatter(f func(r ResourceIdentifier) (map[string]*Link, error)) formatResourceOpt {
+	return func(opts formatResourceOpts) formatResourceOpts {
+		opts.resourceLinksFmt = f
+		return opts
+	}
+}
+
+func WithRelationshipLinksFormatter(
+	toOne func(sc ResourceIdentifier, rel string, related ResourceIdentifier) (map[string]*Link, error),
+	toMany func(sc ResourceIdentifier, rel string, data []ResourceIdentifier) (map[string]*Link, error)) formatResourceOpt {
+	return func(opts formatResourceOpts) formatResourceOpts {
+		opts.toOneRelationshipLinksFmt = toOne
+		return opts
+	}
+}
+
+func FormatResource(a any, opts ...formatResourceOpt) (*Resource, error) {
 	v, err := derefValue(reflect.ValueOf(a))
 	if err != nil {
 		return nil, fmt.Errorf("jsonapi: dereferencing input: %w", err)
 	}
 
-	if v.Type().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("jsonapi: %w", ErrNotStruct)
-	}
-
-	fields, err := parseTags(v)
+	r, err := formatValueAsResource(v, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("jsonapi: parsing tags: %w", err)
+		return nil, fmt.Errorf("jsonapi: %w", err)
 	}
 
-	r := newResource()
-	for _, f := range fields {
-		if err := marshalField(v, &r, f); err != nil {
-			return nil, fmt.Errorf("jsonapi: marshaling field "+f.tag.name+": %w", err)
-		}
-	}
-
-	return &r, nil
+	return r, nil
 }
 
-func MarshalResource(a any) ([]byte, error) {
+func MarshalResource(a any, opts ...formatResourceOpt) ([]byte, error) {
 	v := reflect.ValueOf(a)
 
 	v, err := derefInput(v, resourceMarshalerType)
@@ -270,20 +286,9 @@ func MarshalResource(a any) ([]byte, error) {
 		return v.Interface().(ResourceMarshaler).MarshalJsonApiResource()
 	}
 
-	if v.Type().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("jsonapi: %w", ErrNotStruct)
-	}
-
-	fields, err := parseTags(v)
+	r, err := formatValueAsResource(v, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("jsonapi: parsing tags: %w", err)
-	}
-
-	r := newResource()
-	for _, f := range fields {
-		if err := marshalField(v, &r, f); err != nil {
-			return nil, fmt.Errorf("jsonapi: marshaling field "+f.tag.name+": %w", err)
-		}
+		return nil, fmt.Errorf("jsonapi: %w", err)
 	}
 
 	data, err := json.Marshal(&r)
@@ -292,6 +297,62 @@ func MarshalResource(a any) ([]byte, error) {
 	}
 
 	return data, nil
+}
+
+func formatValueAsResource(v reflect.Value, opts ...formatResourceOpt) (*Resource, error) {
+	formatOpts := formatResourceOpts{}
+	for _, opt := range opts {
+		if opts == nil {
+			return nil, fmt.Errorf("nil option")
+		}
+		formatOpts = opt(formatOpts)
+	}
+
+	if v.Type().Kind() != reflect.Struct {
+		return nil, ErrNotStruct
+	}
+
+	fields, err := parseTags(v)
+	if err != nil {
+		return nil, fmt.Errorf("parsing tags: %w", err)
+	}
+
+	r := newResource()
+	for _, f := range fields {
+		if err := marshalField(v, &r, f); err != nil {
+			return nil, fmt.Errorf("marshaling field "+f.tag.name+": %w", err)
+		}
+	}
+
+	if formatOpts.resourceLinksFmt != nil {
+		links, err := formatOpts.resourceLinksFmt(r.ResourceIdentifier)
+		if err != nil {
+			return nil, fmt.Errorf("formatting resource links: %w", err)
+		}
+		r.Links = links
+	}
+
+	if formatOpts.toOneRelationshipLinksFmt != nil {
+		for relName, rel := range r.ToOneRelationships {
+			links, err := formatOpts.toOneRelationshipLinksFmt(r.ResourceIdentifier, relName, rel.Data)
+			if err != nil {
+				return nil, fmt.Errorf("formatting %s relationship links: %w", relName, err)
+			}
+			rel.Links = links
+		}
+	}
+
+	if formatOpts.toManyRelationshipLinksFmt != nil {
+		for relName, rel := range r.ToManyRelationships {
+			links, err := formatOpts.toManyRelationshipLinksFmt(r.ResourceIdentifier, relName, rel.Data)
+			if err != nil {
+				return nil, fmt.Errorf("formatting %s relationship links: %w", relName, err)
+			}
+			rel.Links = links
+		}
+	}
+
+	return &r, nil
 }
 
 func marshalField(v reflect.Value, r *Resource, f field) error {
@@ -806,7 +867,7 @@ func marshalToOneRel(v reflect.Value, r *Resource, f field) error {
 		return &MarshalErr{f.tag.name, err}
 	}
 
-	r.ToOneRelationships[f.tag.name] = &ToOneResourceLinkage{
+	r.ToOneRelationships[f.tag.name] = &ToOneRelationship{
 		Data: ResourceIdentifier{
 			Type: f.tag.rscType,
 			Id:   j,
@@ -816,7 +877,7 @@ func marshalToOneRel(v reflect.Value, r *Resource, f field) error {
 }
 
 func marshalToManyRel(v reflect.Value, r *Resource, f field) error {
-	r.ToManyRelationships[f.tag.name] = &ToManyResourceLinkage{
+	r.ToManyRelationships[f.tag.name] = &ToManyRelationship{
 		Data: make([]ResourceIdentifier, v.Len()),
 	}
 
