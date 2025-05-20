@@ -1417,6 +1417,352 @@ func TestMarshalResource_Meta_OmitEmpty(t *testing.T) {
 	assert.Equal(t, fmtJson(t, []byte(want)), fmtJson(t, got))
 }
 
+// link of all primitive types
+type linkPrimitive struct {
+	Bool      bool    `jsonapi:"link,bool"`
+	Int       int     `jsonapi:"link,int"`
+	Int8      int8    `jsonapi:"link,int8"`
+	Int16     int16   `jsonapi:"link,int16"`
+	Int32     int32   `jsonapi:"link,int32"`
+	Int64     int64   `jsonapi:"link,int64"`
+	Uint      uint    `jsonapi:"link,uint"`
+	Uint8     uint8   `jsonapi:"link,uint8"`
+	Uint16    uint16  `jsonapi:"link,uint16"`
+	Uint32    uint32  `jsonapi:"link,uint32"`
+	Uint64    uint64  `jsonapi:"link,uint64"`
+	Float32   float32 `jsonapi:"link,float32"`
+	Float64   float64 `jsonapi:"link,float64"`
+	String    string  `jsonapi:"link,string"`
+	Rune      rune    `jsonapi:"link,rune"`
+	Byte      byte    `jsonapi:"link,byte"`
+	SliceByte []byte  `jsonapi:"link,[]byte"`
+}
+
+var linkPrimitiveValue = linkPrimitive{
+	Bool: true,
+	Int:  -1, Int8: -2, Int16: -3, Int32: -4, Int64: -5,
+	Uint: 6, Uint8: 7, Uint16: 8, Uint32: 9, Uint64: 10,
+	Float32: 11.32, Float64: 12.64,
+	String: "str-13", Rune: -14, Byte: 15, SliceByte: []byte("str-16"),
+}
+
+const linkPrimitiveJson = `
+{
+	"links": {
+		"bool": true,
+		"int": -1,
+		"int8": -2,
+		"int16": -3,
+		"int32": -4,
+		"int64": -5,
+		"uint": 6,
+		"uint8": 7,
+		"uint16": 8,
+		"uint32": 9,
+		"uint64": 10,
+		"float32": 11.32,
+		"float64": 12.64,
+		"string": "str-13",
+		"rune": -14,
+		"byte": 15,
+		"[]byte": "c3RyLTE2"
+	}
+}`
+
+func TestMarshalResource_Link_Primitive(t *testing.T) {
+	got, err := MarshalResource(linkPrimitiveValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, fmtJson(t, []byte(linkPrimitiveJson)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_Link_Primitive(t *testing.T) {
+	got := &linkPrimitive{}
+	if err := UnmarshalResource([]byte(linkPrimitiveJson), got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, &linkPrimitiveValue, got)
+}
+
+// link of all primitive ptr types
+type linkPrimitivePtr struct {
+	Bool      *bool    `jsonapi:"link,bool"`
+	Int       *int     `jsonapi:"link,int"`
+	Int8      *int8    `jsonapi:"link,int8"`
+	Int16     *int16   `jsonapi:"link,int16"`
+	Int32     *int32   `jsonapi:"link,int32"`
+	Int64     *int64   `jsonapi:"link,int64"`
+	Uint      *uint    `jsonapi:"link,uint"`
+	Uint8     *uint8   `jsonapi:"link,uint8"`
+	Uint16    *uint16  `jsonapi:"link,uint16"`
+	Uint32    *uint32  `jsonapi:"link,uint32"`
+	Uint64    *uint64  `jsonapi:"link,uint64"`
+	Float32   *float32 `jsonapi:"link,float32"`
+	Float64   *float64 `jsonapi:"link,float64"`
+	String    *string  `jsonapi:"link,string"`
+	Rune      *rune    `jsonapi:"link,rune"`
+	Byte      *byte    `jsonapi:"link,byte"`
+	SliceByte *[]byte  `jsonapi:"link,[]byte"`
+}
+
+var linkPrimitivePtrValue = linkPrimitivePtr{
+	Bool: addrOf(true),
+	Int:  addrOf(-1), Int8: addrOf(int8(-2)), Int16: addrOf(int16(-3)), Int32: addrOf(int32(-4)), Int64: addrOf(int64(-5)),
+	Uint: addrOf(uint(6)), Uint8: addrOf(uint8(7)), Uint16: addrOf(uint16(8)), Uint32: addrOf(uint32(9)), Uint64: addrOf(uint64(10)),
+	Float32: addrOf(float32(11.32)), Float64: addrOf(12.64),
+	String: addrOf("str-13"), Rune: addrOf(rune(-14)), Byte: addrOf(byte(15)), SliceByte: addrOf([]byte("str-16")),
+}
+
+func TestMarshalResource_Link_PrimitivePtr(t *testing.T) {
+	got, err := MarshalResource(linkPrimitivePtrValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, fmtJson(t, []byte(linkPrimitiveJson)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_Link_PrimitivePtr(t *testing.T) {
+	got := &linkPrimitivePtr{}
+	if err := UnmarshalResource([]byte(linkPrimitiveJson), got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, &linkPrimitivePtrValue, got)
+}
+
+func TestMarshalResource_Link_PrimitiveNilPtr(t *testing.T) {
+	got, err := MarshalResource(&linkPrimitivePtr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `
+	{
+		"links": {
+			"bool": null,
+			"int": null, "int8": null, "int16": null, "int32": null, "int64": null,
+			"uint": null, "uint8": null, "uint16": null, "uint32": null, "uint64": null,
+			"float32": null, "float64": null,
+			"string": null, "rune": null, "byte": null, "[]byte": null
+		}
+	}`
+
+	assert.Equal(t, fmtJson(t, []byte(want)), fmtJson(t, got))
+}
+
+// link of various composite types
+type linkComposite struct {
+	ArrBool                 [2]bool                 `jsonapi:"link,[2]bool"`
+	SliceInt                []int                   `jsonapi:"link,[]int"`
+	MapStringUint           map[string]uint         `jsonapi:"link,map[string]uint"`
+	MapStringSliceFloat     map[string][]float64    `jsonapi:"link,map[string][]float64"`
+	SliceMapStringString    []map[string]string     `jsonapi:"link,[]map[string]string"`
+	SliceMapStringSliceByte []map[string][]byte     `jsonapi:"link,[]map[string][]byte"`
+	Struct                  simpleStruct            `jsonapi:"link,struct"`
+	SliceStruct             []simpleStruct          `jsonapi:"link,[]simpleStruct"`
+	MapStringStruct         map[string]simpleStruct `jsonapi:"link,map[string]simpleStruct"`
+}
+
+var linkCompositeValue = linkComposite{
+	ArrBool:       [2]bool{true, false},
+	SliceInt:      []int{-1, -2},
+	MapStringUint: map[string]uint{"key3": 4},
+	MapStringSliceFloat: map[string][]float64{
+		"key5": {6.1, 7.2},
+	},
+	SliceMapStringString: []map[string]string{
+		{"key8": "elem9"},
+	},
+	SliceMapStringSliceByte: []map[string][]byte{
+		{"key10": []byte("elem11")},
+	},
+	Struct: simpleStruct{
+		Int: 12,
+	},
+	SliceStruct:     []simpleStruct{{Int: 13}},
+	MapStringStruct: map[string]simpleStruct{"key14": {Int: 15}},
+}
+
+const linkCompositeJson = `
+{
+	"links": {
+		"[2]bool": [ true, false ],
+  		"[]int": [ -1, -2 ],
+		"map[string]uint": {
+			"key3": 4
+		},
+		"map[string][]float64": {
+			"key5": [ 6.1, 7.2 ]
+		},
+		"[]map[string]string": [
+			{
+				"key8": "elem9"
+			}
+		],
+		"[]map[string][]byte": [
+			{
+				"key10": "ZWxlbTEx"
+			}
+		],
+		"struct": {
+			"int": 12
+		},
+		"[]simpleStruct": [
+			{
+				"int": 13
+			}
+		],
+		"map[string]simpleStruct": {
+			"key14": {
+				"int": 15
+			}
+		}
+	}
+}`
+
+func TestMarshalResource_Link_Composite(t *testing.T) {
+	got, err := MarshalResource(linkCompositeValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, fmtJson(t, []byte(linkCompositeJson)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_Link_Composite(t *testing.T) {
+	got := &linkComposite{}
+	if err := UnmarshalResource([]byte(linkCompositeJson), got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, &linkCompositeValue, got)
+}
+
+// link of various composite ptr types
+type linkCompositePtr struct {
+	ArrBool                 *[2]*bool                 `jsonapi:"link,[2]bool"`
+	SliceInt                *[]*int                   `jsonapi:"link,[]int"`
+	MapStringUint           *map[string]*uint         `jsonapi:"link,map[string]uint"`
+	MapStringSliceFloat     *map[string][]*float64    `jsonapi:"link,map[string][]float64"`
+	SliceMapStringString    *[]map[string]*string     `jsonapi:"link,[]map[string]string"`
+	SliceMapStringSliceByte *[]map[string][]byte      `jsonapi:"link,[]map[string][]byte"`
+	Struct                  *simpleStruct             `jsonapi:"link,struct"`
+	SliceStruct             *[]*simpleStruct          `jsonapi:"link,[]simpleStruct"`
+	MapStringStruct         *map[string]*simpleStruct `jsonapi:"link,map[string]simpleStruct"`
+}
+
+var linkCompositePtrValue = linkCompositePtr{
+	ArrBool:       addrOf([2]*bool{addrOf(true), addrOf(false)}),
+	SliceInt:      addrOf([]*int{addrOf(-1), addrOf(-2)}),
+	MapStringUint: addrOf(map[string]*uint{"key3": addrOf(uint(4))}),
+	MapStringSliceFloat: addrOf(map[string][]*float64{
+		"key5": {addrOf(6.1), addrOf(7.2)},
+	}),
+	SliceMapStringString: addrOf([]map[string]*string{
+		{"key8": addrOf("elem9")},
+	}),
+	SliceMapStringSliceByte: addrOf([]map[string][]byte{
+		{"key10": []byte("elem11")},
+	}),
+	Struct: addrOf(simpleStruct{
+		Int: 12,
+	}),
+	SliceStruct:     addrOf([]*simpleStruct{{Int: 13}}),
+	MapStringStruct: addrOf(map[string]*simpleStruct{"key14": {Int: 15}}),
+}
+
+func TestMarshalResource_Link_CompositePtr(t *testing.T) {
+	got, err := MarshalResource(linkCompositePtrValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, fmtJson(t, []byte(linkCompositeJson)), fmtJson(t, got))
+}
+
+func TestMarshalResource_Link_CompositeNilPtr(t *testing.T) {
+	got, err := MarshalResource(linkCompositePtr{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := `
+	{
+		"links": {
+			"[2]bool": null,
+			"[]int": null,
+			"map[string]uint": null,
+			"map[string][]float64": null,
+			"[]map[string]string": null,
+			"[]map[string][]byte": null,
+			"struct": null,
+			"[]simpleStruct": null,
+			"map[string]simpleStruct": null
+		}
+	}`
+
+	assert.Equal(t, fmtJson(t, []byte(want)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_Link_CompositePtr(t *testing.T) {
+	got := &linkCompositePtr{}
+	if err := UnmarshalResource([]byte(linkCompositeJson), got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, &linkCompositePtrValue, got)
+}
+
+func TestUnmarshalResource_Link_EmptyJson(t *testing.T) {
+	type testCase struct {
+		In       any
+		Expected any
+	}
+
+	data := "{}"
+
+	testCases := []testCase{
+		{linkPrimitive{}, linkPrimitive{}},
+		{linkPrimitivePtr{}, linkPrimitivePtr{}},
+		{linkComposite{}, linkComposite{}},
+		{linkCompositePtr{}, linkCompositePtr{}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("%T", tc.In), func(t *testing.T) {
+			if err := UnmarshalResource([]byte(data), &tc.In); err != nil {
+				t.Fatal(err)
+			}
+
+			assert.Equal(t, tc.Expected, tc.In)
+		})
+	}
+}
+
+func TestMarshalResource_Link_OmitEmpty(t *testing.T) {
+	type tp struct {
+		String    string        `jsonapi:"link,string,omitempty"`
+		IntPtr    *string       `jsonapi:"link,int,omitempty"`
+		Struct    simpleStruct  `jsonapi:"link,struct,omitempty"`
+		StructPtr *simpleStruct `jsonapi:"link,structPtr,omitempty"`
+	}
+
+	in := &tp{}
+
+	got, err := MarshalResource(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "{}"
+
+	assert.Equal(t, fmtJson(t, []byte(want)), fmtJson(t, got))
+}
+
 type noJsonKey struct {
 	A1 int `jsonapi:"attr"`
 	A2 int `jsonapi:"attr,,omitempty"`
@@ -1425,10 +1771,12 @@ type noJsonKey struct {
 	R2 []int `jsonapi:"rel,,rel-type"`
 	M1 int   `jsonapi:"meta"`
 	M2 int   `jsonapi:"meta,,omitempty"`
+	L1 int   `jsonapi:"link"`
+	L2 int   `jsonapi:"link,,omitempty"`
 }
 
 var noJsonKeyValue = noJsonKey{
-	A1: 1, A2: 2, A3: 3, R1: 4, R2: []int{5, 6}, M1: 7, M2: 8,
+	A1: 1, A2: 2, A3: 3, R1: 4, R2: []int{5, 6}, M1: 7, M2: 8, L1: 9,
 }
 
 const noJsonKeyJson = `
@@ -1452,6 +1800,9 @@ const noJsonKeyJson = `
 	"meta": {
 		"M1": 7,
 		"M2": 8
+	},
+	"links": {
+		"L1": 9
 	}
 }
 `
@@ -1959,6 +2310,9 @@ var unsupportedTypes = []any{
 		Chan chan any `jsonapi:"meta"`
 	}{},
 	struct {
+		Chan chan any `jsonapi:"link"`
+	}{},
+	struct {
 		Func func() `jsonapi:"id,type"`
 	}{},
 	struct {
@@ -1969,6 +2323,9 @@ var unsupportedTypes = []any{
 	}{},
 	struct {
 		Func func() `jsonapi:"meta"`
+	}{},
+	struct {
+		Func func() `jsonapi:"link"`
 	}{},
 	struct {
 		Complex complex64 `jsonapi:"id,type"`
@@ -1983,6 +2340,9 @@ var unsupportedTypes = []any{
 		Complex complex64 `jsonapi:"meta"`
 	}{},
 	struct {
+		Complex complex64 `jsonapi:"link"`
+	}{},
+	struct {
 		Complex complex128 `jsonapi:"id,type"`
 	}{},
 	struct {
@@ -1993,6 +2353,9 @@ var unsupportedTypes = []any{
 	}{},
 	struct {
 		Complex complex128 `jsonapi:"meta"`
+	}{},
+	struct {
+		Complex complex128 `jsonapi:"link"`
 	}{},
 }
 
@@ -2060,13 +2423,15 @@ func TestMarshalResource_UnknownTagType(t *testing.T) {
 type ifaceFields struct {
 	A any `jsonapi:"attr,a"`
 	M any `jsonapi:"meta,m"`
+	L any `jsonapi:"link,l"`
 	R any `jsonapi:"rel,name,type"`
 }
 
 var ifaceFieldsValue = ifaceFields{
 	A: simpleStruct{Int: 1},
 	M: addrOf(addrOf(&simpleStruct{Int: 2})),
-	R: 3,
+	R: 3.0,
+	L: addrOf(4),
 }
 
 const ifaceFieldsJson = `
@@ -2085,6 +2450,9 @@ const ifaceFieldsJson = `
 		"m": {
 			"int": 2
 		}
+	},
+	"links": {
+		"l": 4
 	}
 }`
 
@@ -2100,7 +2468,8 @@ func TestUnmarshalResource_InterfaceFields(t *testing.T) {
 	got := ifaceFields{
 		A: simpleStruct{},
 		M: addrOf(addrOf(&simpleStruct{})),
-		R: 0,
+		R: 0.0,
+		L: addrOf(0),
 	}
 	if err := UnmarshalResource([]byte(ifaceFieldsJson), &got); err != nil {
 		t.Fatal(err)
@@ -2113,19 +2482,21 @@ func TestUnmarshalResource_UnitialisedInterfaceFields(t *testing.T) {
 		A: nil,
 		M: nil,
 		R: nil,
+		L: nil,
 	}
 	if err := UnmarshalResource([]byte(ifaceFieldsJson), &got); err != nil {
 		t.Fatal(err)
 	}
 
 	want := ifaceFields{
-		A: map[string]interface{}{
-			"int": float64(1),
+		A: map[string]any{
+			"int": 1.0,
 		},
-		M: map[string]interface{}{
-			"int": float64(2),
+		M: map[string]any{
+			"int": 2.0,
 		},
-		R: float64(3),
+		R: 3.0,
+		L: 4.0,
 	}
 	assert.Equal(t, want, got)
 }
@@ -2166,7 +2537,7 @@ func TestUnmarshalResource_SelfRefPtr(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var i interface{} = float64(1)
+	var i any = float64(1)
 	want := T{
 		A: addrOf(addrOf(i)),
 	}
@@ -2175,7 +2546,7 @@ func TestUnmarshalResource_SelfRefPtr(t *testing.T) {
 }
 
 func TestMarshalResource_AnonymousSelfRefPtr(t *testing.T) {
-	type I interface{}
+	type I any
 
 	type T struct {
 		I
@@ -2236,135 +2607,6 @@ func TestUnmarshalResource_TypeCycle(t *testing.T) {
 	}
 
 	assert.Equal(t, want, got)
-}
-
-type mapMarshalUnmarshaler struct {
-	Id            string                 `jsonapi:"id,type"`
-	Attributes    map[string]interface{} `jsonapi:"-"`
-	Meta          map[string]interface{} `jsonapi:"-"`
-	Relationships map[string]interface{} `jsonapi:"-"`
-}
-
-func (m *mapMarshalUnmarshaler) MarshalJsonApiResource() ([]byte, error) {
-	r, err := FormatResource(m)
-	if err != nil {
-		return nil, err
-	}
-
-	for k, v := range m.Attributes {
-		j, err := json.Marshal(v)
-		if err != nil {
-			return nil, err
-		}
-		r.Attributes[k] = json.RawMessage(j)
-	}
-
-	for k, v := range m.Meta {
-		j, err := json.Marshal(v)
-		if err != nil {
-			return nil, err
-		}
-		r.Meta[k] = json.RawMessage(j)
-	}
-
-	for k, v := range m.Relationships {
-		j, err := json.Marshal(v)
-		if err != nil {
-			return nil, err
-		}
-		r.ToOneRelationships[k] = &ToOneResourceLinkage{
-			Data: ResourceIdentifier{
-				Type: "rel-type",
-				Id:   json.RawMessage(j),
-			},
-		}
-	}
-
-	return json.Marshal(r)
-}
-
-func (m *mapMarshalUnmarshaler) UnmarshalJsonApiResource(data []byte) error {
-	r := &Resource{}
-	if err := json.Unmarshal(data, r); err != nil {
-		return err
-	}
-
-	if err := DeformatResource(r, m); err != nil {
-		return err
-	}
-
-	m.Attributes = map[string]interface{}{}
-	for k, v := range r.Attributes {
-		var i interface{}
-		if err := json.Unmarshal(v, &i); err != nil {
-			return err
-		}
-		m.Attributes[k] = i
-	}
-
-	m.Meta = map[string]interface{}{}
-	for k, v := range r.Meta {
-		var i interface{}
-		if err := json.Unmarshal(v, &i); err != nil {
-			return err
-		}
-		m.Meta[k] = i
-	}
-
-	m.Relationships = map[string]interface{}{}
-	for k, v := range r.ToOneRelationships {
-		var i interface{}
-		if err := json.Unmarshal(v.Data.Id, &i); err != nil {
-			return err
-		}
-		m.Relationships[k] = i
-	}
-
-	return nil
-}
-
-var mapMarshalUnmarshalerValue = mapMarshalUnmarshaler{
-	Id: "id",
-	Attributes: map[string]interface{}{
-		"int": float64(1),
-	},
-	Meta: map[string]interface{}{
-		"float64": 2.1,
-	},
-	Relationships: map[string]interface{}{
-		"name": "3",
-	},
-}
-
-const mapMarshalUnmarshalerJson = `
-{
-	"id": "id",
-	"type": "type",
-	"attributes": {
-		"int": 1
-	},
-	"meta": {
-		"float64": 2.1
-	},
-	"relationships": {
-		"name": { "data": { "type": "rel-type", "id": "3" } }
-	}
-}`
-
-func TestMarshalResource_MapResourceMarshaler(t *testing.T) {
-	got, err := MarshalResource(&mapMarshalUnmarshalerValue)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, fmtJson(t, []byte(mapMarshalUnmarshalerJson)), fmtJson(t, got))
-}
-
-func TestUnmarshalResource_MapResourceUnmarshaler(t *testing.T) {
-	got := mapMarshalUnmarshaler{}
-	if err := UnmarshalResource([]byte(mapMarshalUnmarshalerJson), &got); err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, mapMarshalUnmarshalerValue, got)
 }
 
 type aliasMarshalUnmarshaler struct {
@@ -2447,120 +2689,11 @@ func TestUnmarshalResource_PtrToResourceUnmarshaler(t *testing.T) {
 	assert.Equal(t, &aliasMarshalUnmarshalerValue, got)
 }
 
-type formatMarshalUnmarshaler struct {
-	I     int    `jsonapi:"attr,i"`
-	R     int    `jsonapi:"rel,r1,rel-type"`
-	Link1 string `jsonapi:"-"`
-	Link2 string `jsonapi:"-"`
-	Link3 string `jsonapi:"-"`
-	Link4 string `jsonapi:"-"`
-}
-
-func (m *formatMarshalUnmarshaler) MarshalJsonApiResource() ([]byte, error) {
-	r, err := FormatResource(m)
-	if err != nil {
-		return nil, err
-	}
-
-	r.Links = map[string]*Link{
-		"l1": {
-			LinkString: m.Link1,
-		},
-		"l2": {
-			LinkObject: LinkObject{
-				Href: m.Link2,
-			},
-		},
-	}
-
-	r.ToOneRelationships["r1"].Links = map[string]*Link{
-		"l3": {
-			LinkString: m.Link3,
-		},
-		"l4": {
-			LinkObject: LinkObject{
-				Href: m.Link4,
-			},
-		},
-	}
-
-	return json.Marshal(r)
-}
-
-func (m *formatMarshalUnmarshaler) UnmarshalJsonApiResource(data []byte) error {
-	r := &Resource{}
-	if err := json.Unmarshal(data, r); err != nil {
-		return err
-	}
-
-	if err := DeformatResource(r, m); err != nil {
-		return err
-	}
-
-	m.Link1 = r.Links["l1"].LinkString
-	m.Link2 = r.Links["l2"].LinkObject.Href
-	m.Link3 = r.ToOneRelationships["r1"].Links["l3"].LinkString
-	m.Link4 = r.ToOneRelationships["r1"].Links["l4"].LinkObject.Href
-	return nil
-}
-
-var formatMarshalUnmarshalerValue = formatMarshalUnmarshaler{
-	I:     1,
-	R:     2,
-	Link1: "http://test.com/1",
-	Link2: "http://test.com/2",
-	Link3: "http://test.com/3",
-	Link4: "http://test.com/4",
-}
-
-const formatMarshalUnmarshalerJson = `
-{
-	"attributes": {
-		"i": 1
-	},
-	"links": {
-		"l1": "http://test.com/1",
-		"l2": {
-			"href": "http://test.com/2"
-		}
-	},
-	"relationships": {
-		"r1": {
-			"data": {
-				"type": "rel-type",
-				"id": 2
-			},
-			"links": {
-				"l3": "http://test.com/3",
-				"l4": {
-					"href": "http://test.com/4"
-				}
-			}
-		}
-	}
-}
-`
-
-func TestMarshalResource_FormatResourceMarshaler(t *testing.T) {
-	got, err := MarshalResource(&formatMarshalUnmarshalerValue)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, fmtJson(t, []byte(formatMarshalUnmarshalerJson)), fmtJson(t, got))
-}
-
-func TestUnmarshalResource_FormatResourceUnmarshaler(t *testing.T) {
-	got := formatMarshalUnmarshaler{}
-	if err := UnmarshalResource([]byte(formatMarshalUnmarshalerJson), &got); err != nil {
-		t.Fatal(err)
-	}
-	assert.Equal(t, formatMarshalUnmarshalerValue, got)
-}
-
 type stringTag struct {
 	Id     int     `jsonapi:"id,tp,string"`
 	Attr   float32 `jsonapi:"attr,a,string"`
 	Meta   string  `jsonapi:"meta,m,string"`
+	Link   int     `jsonapi:"link,l,string"`
 	ToOne  int     `jsonapi:"rel,r1,r1-type,string"`
 	ToMany []int   `jsonapi:"rel,r2,r2-type,string"`
 }
@@ -2571,6 +2704,7 @@ var stringTagValue stringTag = stringTag{
 	Meta:   "value",
 	ToOne:  3,
 	ToMany: []int{-4, 5},
+	Link:   6,
 }
 
 const stringTagJson = `{
@@ -2590,6 +2724,9 @@ const stringTagJson = `{
 				{ "type": "r2-type", "id": "5" } 
 			]
 		}
+	},
+	"links": {
+		"l": "6"
 	}
 }`
 
@@ -2712,8 +2849,8 @@ func TestDerefInput(t *testing.T) {
 		I: 1,
 	}
 
-	testImpl := formatMarshalUnmarshaler{
-		I: 1,
+	testImpl := aliasMarshalUnmarshaler{
+		S: &simpleStruct{},
 	}
 
 	testCases := []testCase{
@@ -2818,7 +2955,7 @@ func TestInitValue(t *testing.T) {
 		Exp any
 	}
 
-	var f interface{}
+	var f any
 
 	var i *int
 
@@ -2896,7 +3033,7 @@ func TestDerefValue(t *testing.T) {
 }
 
 func fmtJson(t *testing.T, data []byte) string {
-	m := map[string]interface{}{}
+	m := map[string]any{}
 	if err := json.Unmarshal(data, &m); err != nil {
 		t.Fatal(err)
 	}
