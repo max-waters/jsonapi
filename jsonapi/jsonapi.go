@@ -22,6 +22,7 @@ const (
 	TagValueAttr   = "attr"
 	TagValueRel    = "rel"
 	TagValueMeta   = "meta"
+	TagValueLink   = "link"
 	// options
 	TagValueOmitEmpty = "omitempty"
 	TagValueString    = "string"
@@ -84,87 +85,57 @@ var (
 	resourceUnmarshalerType = reflect.TypeFor[ResourceUnmarshaler]()
 )
 
-type ResourceIdentifier struct {
-	Type string                     `json:"type,omitempty"`
-	Id   json.RawMessage            `json:"id,omitempty"`
-	Meta map[string]json.RawMessage `json:"meta,omitempty"`
+type resourceIdentifier struct {
+	Type string          `json:"type,omitempty"`
+	Id   json.RawMessage `json:"id,omitempty"`
 }
 
-type LinkObject struct {
-	Href        string                 `json:"href"`
-	DescribedBy *Link                  `json:"described_by,omitempty"`
-	Title       string                 `json:"title,omitempty"`
-	Type        string                 `json:"type,omitempty"`
-	HrefLang    []string               `json:"hreflang,omitempty"`
-	Meta        map[string]interface{} `json:"meta,omitempty"`
-}
-
-type Link struct {
-	LinkString string
-	LinkObject LinkObject
-}
-
-func (l *Link) MarshalJSON() ([]byte, error) {
-	if l.LinkString != "" {
-		return json.Marshal(l.LinkString)
-	}
-	return json.Marshal(l.LinkObject)
-}
-
-func (l *Link) UnmarshalJSON(data []byte) error {
-	switch data[0] {
-	case '"':
-		return json.Unmarshal(data, &l.LinkString)
-	case '{':
-		return json.Unmarshal(data, &l.LinkObject)
-	default:
-		return fmt.Errorf("cannot unmarshal into link data")
-	}
-}
-
-type ToOneResourceLinkage struct {
-	Links map[string]*Link           `json:"links,omitempty"`
+type toOneRelationship struct {
+	Data  resourceIdentifier         `json:"data,omitempty"`
+	Links map[string]json.RawMessage `json:"links,omitempty"`
 	Meta  map[string]json.RawMessage `json:"meta,omitempty"`
-	Data  ResourceIdentifier         `json:"data"`
 }
 
-type ToManyResourceLinkage struct {
-	Links map[string]*Link           `json:"links,omitempty"`
+type toManyRelationship struct {
+	Data  []resourceIdentifier       `json:"data,omitempty"`
+	Links map[string]json.RawMessage `json:"links,omitempty"`
 	Meta  map[string]json.RawMessage `json:"meta,omitempty"`
-	Data  []ResourceIdentifier       `json:"data"`
 }
 
-type Resource struct {
-	ResourceIdentifier
+type resource struct {
+	resourceIdentifier
 	Attributes          map[string]json.RawMessage
-	ToOneRelationships  map[string]*ToOneResourceLinkage
-	ToManyRelationships map[string]*ToManyResourceLinkage
-	Links               map[string]*Link
+	ToOneRelationships  map[string]*toOneRelationship
+	ToManyRelationships map[string]*toManyRelationship
+	Links               map[string]json.RawMessage
+	Meta                map[string]json.RawMessage
 }
 
-func newResource() Resource {
-	return Resource{
-		ResourceIdentifier: ResourceIdentifier{
-			Meta: map[string]json.RawMessage{},
-		},
+func newResource() resource {
+	return resource{
+		resourceIdentifier:  resourceIdentifier{},
 		Attributes:          map[string]json.RawMessage{},
-		ToOneRelationships:  map[string]*ToOneResourceLinkage{},
-		ToManyRelationships: map[string]*ToManyResourceLinkage{},
+		ToOneRelationships:  map[string]*toOneRelationship{},
+		ToManyRelationships: map[string]*toManyRelationship{},
+		Meta:                map[string]json.RawMessage{},
+		Links:               map[string]json.RawMessage{},
 	}
 }
 
-func (r *Resource) MarshalJSON() ([]byte, error) {
+func (r *resource) MarshalJSON() ([]byte, error) {
 	type alias struct {
-		ResourceIdentifier
+		resourceIdentifier
 		Attributes    map[string]json.RawMessage `json:"attributes,omitempty"`
 		Relationships map[string]any             `json:"relationships,omitempty"`
-		Links         map[string]*Link           `json:"links,omitempty"`
+		Links         map[string]json.RawMessage `json:"links,omitempty"`
+		Meta          map[string]json.RawMessage `json:"meta,omitempty"`
 	}
 	a := alias{
-		ResourceIdentifier: r.ResourceIdentifier,
+		resourceIdentifier: r.resourceIdentifier,
 		Attributes:         r.Attributes,
 		Relationships:      make(map[string]any, len(r.ToOneRelationships)+len(r.ToManyRelationships)),
 		Links:              r.Links,
+		Meta:               r.Meta,
 	}
 
 	for k, v := range r.ToOneRelationships {
@@ -177,18 +148,19 @@ func (r *Resource) MarshalJSON() ([]byte, error) {
 	return json.Marshal(a)
 }
 
-func (r *Resource) UnmarshalJSON(data []byte) error {
+func (r *resource) UnmarshalJSON(data []byte) error {
 	type relAlias struct {
 		Meta  map[string]json.RawMessage `json:"meta"`
 		Data  json.RawMessage            `json:"data"`
-		Links map[string]*Link           `json:"links"`
+		Links map[string]json.RawMessage `json:"links"`
 	}
 
 	type alias struct {
-		ResourceIdentifier
+		resourceIdentifier
 		Attributes    map[string]json.RawMessage `json:"attributes"`
 		Relationships map[string]relAlias        `json:"relationships"`
-		Links         map[string]*Link           `json:"links"`
+		Links         map[string]json.RawMessage `json:"links"`
+		Meta          map[string]json.RawMessage `json:"meta"`
 	}
 
 	a := alias{}
@@ -197,30 +169,31 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	r.ResourceIdentifier = a.ResourceIdentifier
+	r.resourceIdentifier = a.resourceIdentifier
 	r.Attributes = a.Attributes
 	r.Links = a.Links
-	r.ToOneRelationships = map[string]*ToOneResourceLinkage{}
-	r.ToManyRelationships = map[string]*ToManyResourceLinkage{}
+	r.Meta = a.Meta
+	r.ToOneRelationships = map[string]*toOneRelationship{}
+	r.ToManyRelationships = map[string]*toManyRelationship{}
 
 	for name, rel := range a.Relationships {
 		switch rel.Data[0] {
 		case '[':
-			ids := []ResourceIdentifier{}
+			ids := []resourceIdentifier{}
 			if err := json.Unmarshal(rel.Data, &ids); err != nil {
 				return err
 			}
-			r.ToManyRelationships[name] = &ToManyResourceLinkage{
+			r.ToManyRelationships[name] = &toManyRelationship{
 				Meta:  rel.Meta,
 				Data:  ids,
 				Links: rel.Links,
 			}
 		case '{':
-			id := ResourceIdentifier{}
+			id := resourceIdentifier{}
 			if err := json.Unmarshal(rel.Data, &id); err != nil {
 				return err
 			}
-			r.ToOneRelationships[name] = &ToOneResourceLinkage{
+			r.ToOneRelationships[name] = &toOneRelationship{
 				Meta:  rel.Meta,
 				Data:  id,
 				Links: rel.Links,
@@ -233,32 +206,15 @@ func (r *Resource) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func FormatResource(a any) (*Resource, error) {
-	v, err := derefValue(reflect.ValueOf(a))
-	if err != nil {
-		return nil, fmt.Errorf("jsonapi: dereferencing input: %w", err)
-	}
-
-	if v.Type().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("jsonapi: %w", ErrNotStruct)
-	}
-
-	fields, err := parseTags(v)
-	if err != nil {
-		return nil, fmt.Errorf("jsonapi: parsing tags: %w", err)
-	}
-
-	r := newResource()
-	for _, f := range fields {
-		if err := marshalField(v, &r, f); err != nil {
-			return nil, fmt.Errorf("jsonapi: marshaling field "+f.tag.name+": %w", err)
+func MarshalResource(a any, opts ...marshalResourceOpt) ([]byte, error) {
+	marshalOpts := marshalResourceOpts{}
+	for _, opt := range opts {
+		if opt == nil {
+			return nil, fmt.Errorf("nil option")
 		}
+		marshalOpts = opt(marshalOpts)
 	}
 
-	return &r, nil
-}
-
-func MarshalResource(a any) ([]byte, error) {
 	v := reflect.ValueOf(a)
 
 	v, err := derefInput(v, resourceMarshalerType)
@@ -271,19 +227,12 @@ func MarshalResource(a any) ([]byte, error) {
 	}
 
 	if v.Type().Kind() != reflect.Struct {
-		return nil, fmt.Errorf("jsonapi: %w", ErrNotStruct)
+		return nil, ErrNotStruct
 	}
 
-	fields, err := parseTags(v)
+	r, err := format(v, marshalOpts)
 	if err != nil {
-		return nil, fmt.Errorf("jsonapi: parsing tags: %w", err)
-	}
-
-	r := newResource()
-	for _, f := range fields {
-		if err := marshalField(v, &r, f); err != nil {
-			return nil, fmt.Errorf("jsonapi: marshaling field "+f.tag.name+": %w", err)
-		}
+		return nil, fmt.Errorf("jsonapi: %w", err)
 	}
 
 	data, err := json.Marshal(&r)
@@ -294,45 +243,65 @@ func MarshalResource(a any) ([]byte, error) {
 	return data, nil
 }
 
-func marshalField(v reflect.Value, r *Resource, f field) error {
-	switch f.tag.typ {
-	case TagValueId:
-		return marshalId(v, r, f)
-	case TagValueAttr:
-		return marshalAttr(v, r, f)
-	case TagValueRel:
-		return marshalRel(v, r, f)
-	case TagValueMeta:
-		return marshalMeta(v, r, f)
-	}
-	return errors.New("unknown tag type " + f.tag.typ)
-}
-
-func DeformatResource(r *Resource, a any) error {
-	v := reflect.ValueOf(a)
-
-	if v.Kind() != reflect.Pointer {
-		return ErrNotStructPtr
-	}
-
-	v, err := derefValue(v)
-	if err != nil {
-		return fmt.Errorf("jsonapi: dereferencing input: %w", err)
-	}
-
-	if v.Type().Kind() != reflect.Struct {
-		return ErrNotStructPtr
-	}
-
+func format(v reflect.Value, opts marshalResourceOpts) (resource, error) {
 	fields, err := parseTags(v)
 	if err != nil {
-		return fmt.Errorf("jsonapi: parsing tags: %w", err)
+		return resource{}, fmt.Errorf("parsing tags: %w", err)
 	}
 
+	r := newResource()
 	for _, f := range fields {
-		if err := unmarshalField(v, r, f); err != nil {
-			return fmt.Errorf("jsonapi: unmarshaling field "+f.tag.name+": %w", err)
+		if err := marshalField(v, &r, f); err != nil {
+			return resource{}, fmt.Errorf("marshaling field "+f.tag.name+": %w", err)
 		}
+	}
+
+	if err := applyMarshalOpts(r, opts); err != nil {
+		return resource{}, err
+	}
+
+	return r, nil
+}
+
+func marshalField(v reflect.Value, r *resource, f field) error {
+	if f.tag.typ == TagValueRel {
+		return marshalRel(v, r, f)
+	}
+
+	if f.tag.typ == TagValueId {
+		r.Type = f.tag.rscType
+	}
+
+	v, err := fieldByIndex(v, f.idxs)
+	if err != nil {
+		return err
+	}
+
+	v, err = derefValue(v)
+	if err != nil {
+		return err
+	}
+
+	if f.tag.omitempty && isEmpty(v) {
+		return nil
+	}
+
+	j, err := marshalJson(v, f.tag.quote)
+	if err != nil {
+		return &MarshalErr{f.tag.name, err}
+	}
+
+	switch f.tag.typ {
+	case TagValueId:
+		r.resourceIdentifier.Id = j
+	case TagValueAttr:
+		r.Attributes[f.tag.name] = j
+	case TagValueMeta:
+		r.Meta[f.tag.name] = j
+	case TagValueLink:
+		r.Links[f.tag.name] = j
+	default:
+		return errors.New("unknown tag type " + f.tag.typ)
 	}
 
 	return nil
@@ -363,6 +332,10 @@ func UnmarshalResource(data []byte, a any) error {
 		return fmt.Errorf("jsonapi: unmarshaling resource: %w", err)
 	}
 
+	return deformat(v, r)
+}
+
+func deformat(v reflect.Value, r resource) error {
 	fields, err := parseTags(v)
 	if err != nil {
 		return fmt.Errorf("jsonapi: parsing tags: %w", err)
@@ -376,16 +349,36 @@ func UnmarshalResource(data []byte, a any) error {
 	return nil
 }
 
-func unmarshalField(v reflect.Value, r *Resource, f field) error {
+func unmarshalField(v reflect.Value, r *resource, f field) error {
+	if f.tag.typ == TagValueRel {
+		return unmarshalRel(v, r, f)
+	}
+
+	var j json.RawMessage
 	switch f.tag.typ {
 	case TagValueId:
-		return unmarshalId(v, r, f)
+		j = r.resourceIdentifier.Id
 	case TagValueAttr:
-		return unmarshalAttr(v, r, f)
-	case TagValueRel:
-		return unmarshalRel(v, r, f)
+		j = r.Attributes[f.tag.name]
 	case TagValueMeta:
-		return unmarshalMeta(v, r, f)
+		j = r.Meta[f.tag.name]
+	case TagValueLink:
+		j = r.Links[f.tag.name]
+	default:
+		return errors.New("unknown tag type " + f.tag.typ)
+	}
+
+	if len(j) == 0 {
+		return nil
+	}
+
+	v, err := initFieldByIndex(v, f.idxs)
+	if err != nil {
+		return err
+	}
+
+	if err := unmarshalJson(j, v, f.tag.quote); err != nil {
+		return &UnmarshalErr{f.tag.name, err}
 	}
 	return nil
 }
@@ -448,7 +441,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 			types[c.t] = true
 
-			for i := 0; i < c.t.NumField(); i++ {
+			for i := range c.t.NumField() {
 				f := c.t.Field(i) // alloc (!)
 
 				typ, opts, ok := splitTypeAndOpts(f)
@@ -537,7 +530,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 	// with a higher precedence
 	nFiltered := 0
 	for nType, i := 0, 0; i < len(fields); i += nType {
-		// find sublice of all fields of the same type
+		// find subslice of all fields of the same type
 		typ := fields[i].tag.typ
 		for nType = 1; i+nType < len(fields); nType++ {
 			if fields[i+nType].tag.typ != typ {
@@ -592,7 +585,7 @@ func getDominantField(fs []field) (field, bool) {
 	return fs[0], true
 }
 
-func parseTag(f reflect.StructField, typ string, opts string) (tag, error) {
+func parseTag(f reflect.StructField, typ, opts string) (tag, error) {
 	k := derefType(f.Type).Kind()
 	switch k {
 	case reflect.Func, reflect.Chan, reflect.Complex64, reflect.Complex128:
@@ -608,15 +601,17 @@ func parseTag(f reflect.StructField, typ string, opts string) (tag, error) {
 		return parseMetaTag(f, opts)
 	case TagValueRel:
 		return parseRelTag(f, opts)
+	case TagValueLink:
+		return parseLinkTag(f, opts)
 	default:
 		return tag{}, &TagErr{f.Name, errors.New("unknown tag type: " + typ)}
 	}
 }
 
-// field represents the tags found on a
-// particular struct field, with tag representing
-// the annotated tag, and idxs uniquely identifying
-// this field with its path from the top-level struct
+// field represents a tagged struct field,
+// with tag representing the annotated tag, and idxs
+// uniquely identifying this field with its path
+// from the top-level struct
 type field struct {
 	// the tag information annotated onto this struct field
 	tag tag
@@ -635,7 +630,7 @@ type tag struct {
 	// name being the highest, then a json tag, then
 	// the declared field name
 	namePrec int
-	// If this typ is relationship or id, this field
+	// If this type is relationship or id, this field
 	// defines the resource type
 	rscType string
 	// whether the "string" flag was specified
@@ -661,48 +656,6 @@ func parseIdTag(f reflect.StructField, opts string) (tag, error) {
 	}, nil
 }
 
-func marshalId(v reflect.Value, r *Resource, f field) error {
-	r.Type = f.tag.rscType
-
-	v, err := fieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-
-	v, err = derefValue(v)
-	if err != nil {
-		return err
-	}
-
-	if f.tag.omitempty && isEmpty(v) {
-		return nil
-	}
-
-	j, err := marshalJson(v, f.tag.quote)
-	if err != nil {
-		return &MarshalErr{f.tag.name, err}
-	}
-
-	r.ResourceIdentifier.Id = j
-
-	return nil
-}
-
-func unmarshalId(v reflect.Value, r *Resource, f field) error {
-	if len(r.ResourceIdentifier.Id) == 0 {
-		return nil
-	}
-	v, err := initFieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-
-	if err := unmarshalJson(r.ResourceIdentifier.Id, v, f.tag.quote); err != nil {
-		return &UnmarshalErr{f.tag.name, err}
-	}
-	return nil
-}
-
 // parseAttrTag parses an attribute tag, eg `jsonapi:"attr,name,opt1,opt2..."`
 func parseAttrTag(f reflect.StructField, opts string) (tag, error) {
 	name, namePrec, opts := splitNameAndOpts(f, opts)
@@ -715,47 +668,6 @@ func parseAttrTag(f reflect.StructField, opts string) (tag, error) {
 		omitempty: omitempty,
 		quote:     quote,
 	}, nil
-}
-
-func marshalAttr(v reflect.Value, r *Resource, f field) error {
-	v, err := fieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-
-	v, err = derefValue(v)
-	if err != nil {
-		return err
-	}
-
-	if f.tag.omitempty && isEmpty(v) {
-		return nil
-	}
-
-	j, err := marshalJson(v, f.tag.quote)
-	if err != nil {
-		return &MarshalErr{f.tag.name, err}
-	}
-
-	r.Attributes[f.tag.name] = j
-
-	return nil
-}
-
-func unmarshalAttr(v reflect.Value, r *Resource, f field) error {
-	if len(r.Attributes[f.tag.name]) == 0 {
-		return nil
-	}
-
-	v, err := initFieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-
-	if err := unmarshalJson(r.Attributes[f.tag.name], v, f.tag.quote); err != nil {
-		return &UnmarshalErr{f.tag.name, err}
-	}
-	return nil
 }
 
 // parseRelTag parses a relationship tag, eg `jsonapi:"rel,name,type,opt1,opt2..."`
@@ -778,7 +690,7 @@ func parseRelTag(f reflect.StructField, opts string) (tag, error) {
 	}, nil
 }
 
-func marshalRel(v reflect.Value, r *Resource, f field) error {
+func marshalRel(v reflect.Value, r *resource, f field) error {
 	v, err := fieldByIndex(v, f.idxs)
 	if err != nil {
 		return err
@@ -800,14 +712,14 @@ func marshalRel(v reflect.Value, r *Resource, f field) error {
 	return marshalToManyRel(v, r, f)
 }
 
-func marshalToOneRel(v reflect.Value, r *Resource, f field) error {
+func marshalToOneRel(v reflect.Value, r *resource, f field) error {
 	j, err := marshalJson(v, f.tag.quote)
 	if err != nil {
 		return &MarshalErr{f.tag.name, err}
 	}
 
-	r.ToOneRelationships[f.tag.name] = &ToOneResourceLinkage{
-		Data: ResourceIdentifier{
+	r.ToOneRelationships[f.tag.name] = &toOneRelationship{
+		Data: resourceIdentifier{
 			Type: f.tag.rscType,
 			Id:   j,
 		},
@@ -815,12 +727,12 @@ func marshalToOneRel(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
-func marshalToManyRel(v reflect.Value, r *Resource, f field) error {
-	r.ToManyRelationships[f.tag.name] = &ToManyResourceLinkage{
-		Data: make([]ResourceIdentifier, v.Len()),
+func marshalToManyRel(v reflect.Value, r *resource, f field) error {
+	r.ToManyRelationships[f.tag.name] = &toManyRelationship{
+		Data: make([]resourceIdentifier, v.Len()),
 	}
 
-	for i := 0; i < v.Len(); i++ {
+	for i := range v.Len() {
 		vi, err := derefValue(v.Index(i))
 		if err != nil {
 			return err
@@ -831,7 +743,7 @@ func marshalToManyRel(v reflect.Value, r *Resource, f field) error {
 			return &MarshalErr{f.tag.name, err}
 		}
 
-		r.ToManyRelationships[f.tag.name].Data[i] = ResourceIdentifier{
+		r.ToManyRelationships[f.tag.name].Data[i] = resourceIdentifier{
 			Type: f.tag.rscType,
 			Id:   j,
 		}
@@ -840,7 +752,7 @@ func marshalToManyRel(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
-func unmarshalRel(v reflect.Value, r *Resource, f field) error {
+func unmarshalRel(v reflect.Value, r *resource, f field) error {
 	fv, err := fieldByIndex(v, f.idxs)
 	if err != nil {
 		return err
@@ -852,7 +764,7 @@ func unmarshalRel(v reflect.Value, r *Resource, f field) error {
 	return unmarshalToManyRel(v, r, f)
 }
 
-func unmarshalToOneRel(v reflect.Value, r *Resource, f field) error {
+func unmarshalToOneRel(v reflect.Value, r *resource, f field) error {
 	rel, ok := r.ToOneRelationships[f.tag.name]
 	if !ok {
 		return nil
@@ -873,7 +785,7 @@ func unmarshalToOneRel(v reflect.Value, r *Resource, f field) error {
 	return nil
 }
 
-func unmarshalToManyRel(v reflect.Value, r *Resource, f field) error {
+func unmarshalToManyRel(v reflect.Value, r *resource, f field) error {
 	rels, ok := r.ToManyRelationships[f.tag.name]
 	if !ok {
 		return nil
@@ -922,43 +834,18 @@ func parseMetaTag(f reflect.StructField, opts string) (tag, error) {
 	}, nil
 }
 
-func marshalMeta(v reflect.Value, r *Resource, f field) error {
-	v, err := fieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-	v, err = derefValue(v)
-	if err != nil {
-		return err
-	}
+// parseMetaTag parses a link tag, eg `jsonapi:"link,name,opt1,opt2..."`
+func parseLinkTag(f reflect.StructField, opts string) (tag, error) {
+	name, namePrec, opts := splitNameAndOpts(f, opts)
+	omitempty, quote := optFlags(opts)
 
-	if f.tag.omitempty && isEmpty(v) {
-		return nil
-	}
-
-	j, err := marshalJson(v, f.tag.quote)
-	if err != nil {
-		return &MarshalErr{f.tag.name, err}
-	}
-
-	r.Meta[f.tag.name] = j
-	return nil
-}
-
-func unmarshalMeta(v reflect.Value, r *Resource, f field) error {
-	if len(r.Meta[f.tag.name]) == 0 {
-		return nil
-	}
-
-	v, err := initFieldByIndex(v, f.idxs)
-	if err != nil {
-		return err
-	}
-
-	if err := unmarshalJson(r.Meta[f.tag.name], v, f.tag.quote); err != nil {
-		return &UnmarshalErr{f.tag.name, err}
-	}
-	return nil
+	return tag{
+		typ:       TagValueLink,
+		name:      name,
+		namePrec:  namePrec,
+		omitempty: omitempty,
+		quote:     quote,
+	}, nil
 }
 
 // splitTypeAndOpts extracts the jsonapi tag value from the supplied tag
