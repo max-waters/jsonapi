@@ -27,7 +27,7 @@ func newResourceIdentifier(r resourceIdentifier) ResourceIdentifier {
 	return ri
 }
 
-// The Link interface represents JSON:API link,
+// The Link interface represents a JSON:API link,
 // ie either a uri reference or an object. It has
 // a single unexported method and so cannot be
 // implemented by code outside of this package.
@@ -51,7 +51,7 @@ type linkObject struct {
 	Meta        map[string]any `json:"meta,omitempty"`
 }
 
-// UriLink returns a Link that represents a uri-reference.
+// UriLink returns a Link that represents a uri reference.
 func UriLink(uri string) Link {
 	return link{Uri: uri}
 }
@@ -91,41 +91,61 @@ func (l link) UnmarshalJSON(data []byte) error {
 	}
 }
 
-type ResourceLinker func(r ResourceIdentifier) (map[string]Link, error)
-type RelationshipLinker func(r ResourceIdentifier, relationship string, data ...ResourceIdentifier) (map[string]Link, error)
+type ResourceLinks func(a any, r ResourceIdentifier) (map[string]Link, error)
+type RelationshipLinks func(a any, r ResourceIdentifier, relationship string, data ...ResourceIdentifier) (map[string]Link, error)
 
 type marshalResourceOpts struct {
-	resourceLinker     ResourceLinker
-	relationshipLinker RelationshipLinker
+	resourceLinks     ResourceLinks
+	relationshipLinks RelationshipLinks
+	resourceMeta      ResourceMeta
+	relationshipMeta  RelationshipMeta
 }
 
 type marshalResourceOpt func(opts marshalResourceOpts) marshalResourceOpts
 
-func WithResourceLinker(linker ResourceLinker) marshalResourceOpt {
+func WithResourceLinks(links ResourceLinks) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
-		opts.resourceLinker = linker
+		opts.resourceLinks = links
 		return opts
 	}
 }
 
-func WithRelationshipLinker(linker RelationshipLinker) marshalResourceOpt {
+func WithRelationshipLinks(links RelationshipLinks) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
-		opts.relationshipLinker = linker
+		opts.relationshipLinks = links
 		return opts
 	}
 }
 
-func applyMarshalOpts(r resource, opts marshalResourceOpts) error {
-	if opts.resourceLinker == nil && opts.relationshipLinker == nil {
+type ResourceMeta func(a any, r ResourceIdentifier) (map[string]any, error)
+type RelationshipMeta func(a any, r ResourceIdentifier, relationship string, data ...ResourceIdentifier) (map[string]any, error)
+
+func WithResourceMeta(meta ResourceMeta) marshalResourceOpt {
+	return func(opts marshalResourceOpts) marshalResourceOpts {
+		opts.resourceMeta = meta
+		return opts
+	}
+}
+
+func WithRelationshipMeta(meta RelationshipMeta) marshalResourceOpt {
+	return func(opts marshalResourceOpts) marshalResourceOpts {
+		opts.relationshipMeta = meta
+		return opts
+	}
+}
+
+func applyMarshalOpts(a any, r resource, opts marshalResourceOpts) error {
+	if opts.resourceLinks == nil && opts.relationshipLinks == nil &&
+		opts.resourceMeta == nil && opts.relationshipMeta == nil {
 		return nil
 	}
 
 	rscId := newResourceIdentifier(r.resourceIdentifier)
 
-	if opts.resourceLinker != nil {
-		links, err := opts.resourceLinker(rscId)
+	if opts.resourceLinks != nil {
+		links, err := opts.resourceLinks(a, rscId)
 		if err != nil {
-			return fmt.Errorf("formatting resource links: %w", err)
+			return fmt.Errorf("adding resource links: %w", err)
 		}
 
 		for name, link := range links {
@@ -137,14 +157,14 @@ func applyMarshalOpts(r resource, opts marshalResourceOpts) error {
 		}
 	}
 
-	if opts.relationshipLinker != nil {
+	if opts.relationshipLinks != nil {
 		for relName, rel := range r.ToOneRelationships {
-			links, err := opts.relationshipLinker(rscId, relName, newResourceIdentifier(rel.Data))
+			links, err := opts.relationshipLinks(a, rscId, relName, newResourceIdentifier(rel.Data))
 			if err != nil {
-				return fmt.Errorf("formatting links for relationship %s: %w", relName, err)
+				return fmt.Errorf("adding links for relationship %s: %w", relName, err)
 			}
 
-			rel.Links, err = formatLinks(links)
+			rel.Links, err = formatMap(links)
 			if err != nil {
 				return err
 			}
@@ -156,12 +176,58 @@ func applyMarshalOpts(r resource, opts marshalResourceOpts) error {
 				data[i] = newResourceIdentifier(d)
 			}
 
-			links, err := opts.relationshipLinker(rscId, relName, data...)
+			links, err := opts.relationshipLinks(a, rscId, relName, data...)
 			if err != nil {
-				return fmt.Errorf("formatting links for relationship %s: %w", relName, err)
+				return fmt.Errorf("adding links for relationship %s: %w", relName, err)
 			}
 
-			rel.Links, err = formatLinks(links)
+			rel.Links, err = formatMap(links)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	if opts.resourceMeta != nil {
+		meta, err := opts.resourceMeta(a, rscId)
+		if err != nil {
+			return fmt.Errorf("adding resource meta: %w", err)
+		}
+
+		for name, m := range meta {
+			l, err := json.Marshal(m)
+			if err != nil {
+				return &MarshalErr{Field: name, Err: err}
+			}
+			r.Meta[name] = l
+		}
+	}
+
+	if opts.relationshipMeta != nil {
+		for relName, rel := range r.ToOneRelationships {
+			meta, err := opts.relationshipMeta(a, rscId, relName, newResourceIdentifier(rel.Data))
+			if err != nil {
+				return fmt.Errorf("adding meta for relationship %s: %w", relName, err)
+			}
+
+			rel.Meta, err = formatMap(meta)
+			if err != nil {
+				return err
+			}
+		}
+
+		for relName, rel := range r.ToManyRelationships {
+			data := make([]ResourceIdentifier, len(rel.Data))
+			for i, d := range rel.Data {
+				data[i] = newResourceIdentifier(d)
+			}
+
+			meta, err := opts.relationshipMeta(a, rscId, relName, data...)
+			if err != nil {
+				return fmt.Errorf("adding meta for relationship %s: %w", relName, err)
+			}
+
+			rel.Meta, err = formatMap(meta)
 			if err != nil {
 				return err
 			}
@@ -171,14 +237,14 @@ func applyMarshalOpts(r resource, opts marshalResourceOpts) error {
 	return nil
 }
 
-func formatLinks(links map[string]Link) (map[string]json.RawMessage, error) {
-	jsonLinks := make(map[string]json.RawMessage, len(links))
-	for name, link := range links {
-		l, err := json.Marshal(link)
+func formatMap[A any](m map[string]A) (map[string]json.RawMessage, error) {
+	formatted := make(map[string]json.RawMessage, len(m))
+	for k, v := range m {
+		f, err := json.Marshal(v)
 		if err != nil {
-			return nil, &MarshalErr{Field: name, Err: err}
+			return nil, &MarshalErr{Field: k, Err: err}
 		}
-		jsonLinks[name] = l
+		formatted[k] = f
 	}
-	return jsonLinks, nil
+	return formatted, nil
 }
