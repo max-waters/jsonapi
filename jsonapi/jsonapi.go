@@ -230,7 +230,7 @@ func MarshalResource(a any, opts ...marshalResourceOpt) ([]byte, error) {
 		return nil, ErrNotStruct
 	}
 
-	r, err := format(v, marshalOpts)
+	r, err := format(a, v, marshalOpts)
 	if err != nil {
 		return nil, fmt.Errorf("jsonapi: %w", err)
 	}
@@ -243,7 +243,7 @@ func MarshalResource(a any, opts ...marshalResourceOpt) ([]byte, error) {
 	return data, nil
 }
 
-func format(v reflect.Value, opts marshalResourceOpts) (resource, error) {
+func format(a any, v reflect.Value, opts marshalResourceOpts) (resource, error) {
 	fields, err := parseTags(v)
 	if err != nil {
 		return resource{}, fmt.Errorf("parsing tags: %w", err)
@@ -256,7 +256,7 @@ func format(v reflect.Value, opts marshalResourceOpts) (resource, error) {
 		}
 	}
 
-	if err := applyMarshalOpts(r, opts); err != nil {
+	if err := applyMarshalOpts(a, r, opts); err != nil {
 		return resource{}, err
 	}
 
