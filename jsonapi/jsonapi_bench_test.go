@@ -2,6 +2,7 @@ package jsonapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -12,6 +13,7 @@ func BenchmarkResourceMarshalJSON_Empty(b *testing.B) {
 	// currently: 2 allocations
 	r := resource{}
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := r.MarshalJSON(); err != nil {
 			b.Fatal(err)
@@ -52,6 +54,7 @@ func BenchmarkResourceMarshalJSON(b *testing.B) {
 		},
 	}
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := r.MarshalJSON(); err != nil {
 			b.Fatal(err)
@@ -66,8 +69,8 @@ func BenchmarkResourceUnmarshalJSON_Empty(b *testing.B) {
 	r := resource{}
 	data := []byte(`{}`)
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-
 		if err := r.UnmarshalJSON(data); err != nil {
 			b.Fatal(err)
 		}
@@ -81,6 +84,7 @@ func BenchmarkResourceUnmarshalJSON(b *testing.B) {
 	r := resource{}
 	data := []byte(`{"type":"type","id":"1","attributes":{"a":"val"},"relationships":{"r1":{"data":{"type":"type","id":"1"}},"r2":{"data":[{"type":"type","id":"1"}]}},"links":{"m":"val"},"meta":{"l":"val"}}`)
 
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if err := r.UnmarshalJSON(data); err != nil {
 			b.Fatal(err)
@@ -98,11 +102,16 @@ func BenchmarkFormat_Empty(b *testing.B) {
 	o := marshalResourceOpts{}
 
 	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		if _, err := format(in, v, o); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := format(in, v, o); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -120,10 +129,16 @@ func BenchmarkFormat_Id(b *testing.B) {
 	o := marshalResourceOpts{}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := format(in, v, o); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := format(in, v, o); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -141,10 +156,16 @@ func BenchmarkFormat_Attributes(b *testing.B) {
 	o := marshalResourceOpts{}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := format(in, v, o); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := format(in, v, o); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -163,10 +184,16 @@ func BenchmarkFormat_ToOneRelationships(b *testing.B) {
 	o := marshalResourceOpts{}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := format(in, v, o); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := format(in, v, o); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -182,12 +209,19 @@ func BenchmarkFormat_ToManyRelationships(b *testing.B) {
 		A: []int{1, 2}, B: []int{3, 4},
 	}
 	v := reflect.ValueOf(in)
+	o := marshalResourceOpts{}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := format(in, v, marshalResourceOpts{}); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := format(in, v, o); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -203,11 +237,16 @@ func BenchmarkDeformat_Empty(b *testing.B) {
 	r := resource{}
 
 	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		if err := deformat(v, r); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if err := deformat(v, r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -231,10 +270,16 @@ func BenchmarkDeformat_Id(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := deformat(v, r); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if err := deformat(v, r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -259,10 +304,16 @@ func BenchmarkDeformat_Attributes(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := deformat(v, r); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if err := deformat(v, r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -296,10 +347,16 @@ func BenchmarkDeformat_ToOneRelationships(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := deformat(v, r); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if err := deformat(v, r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -331,10 +388,16 @@ func BenchmarkDeformat_ToManyRelationships(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if err := deformat(v, r); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if err := deformat(v, r); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -346,11 +409,16 @@ func BenchmarkParseTags_Empty(b *testing.B) {
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -364,27 +432,39 @@ func BenchmarkParseTags_Id(b *testing.B) {
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
 func BenchmarkParseTags_Attributes(b *testing.B) {
 	b.ReportAllocs()
 
-	// currently: num allocations = (2 x num fields) + 2 = 6
+	// currently: num allocations = (2 x num fields) + 2 = 8
 	type T struct {
 		A, B, C int
 	}
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -399,10 +479,16 @@ func BenchmarkParseTags_ToOneRelationships(b *testing.B) {
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -417,10 +503,16 @@ func BenchmarkParseTags_ToManyRelationships(b *testing.B) {
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
@@ -441,10 +533,51 @@ func BenchmarkParseTags_Anons(b *testing.B) {
 	v := reflect.ValueOf(T{})
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		if _, err := parseTags(v); err != nil {
-			b.Fatal(err)
-		}
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkParseTags_AnonInterfaces(b *testing.B) {
+	b.ReportAllocs()
+
+	// currently: num allocations = (2 x num anon fields)) + 2 = 6
+	type I1 any
+	type I2 any
+
+	type T2 struct {
+		I2
+	}
+
+	type T struct {
+		I1
+	}
+
+	v := reflect.ValueOf(T{
+		I1: T2{
+			I2: T2{},
+		},
+	})
+
+	b.ResetTimer()
+	for _, cache := range []bool{false, true} {
+		b.Run(fmt.Sprintf("cache=%v", cache), func(b *testing.B) {
+			fieldCache.Clear()
+			enableFieldCache = cache
+			for i := 0; i < b.N; i++ {
+				if _, err := parseTags(v); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
 
