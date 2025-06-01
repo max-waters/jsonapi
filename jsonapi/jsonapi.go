@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"unsafe"
 
 	"reflect"
@@ -387,6 +388,9 @@ func unmarshalField(v reflect.Value, r *resource, f field) error {
 	return nil
 }
 
+var enableFieldCache = true
+var fieldCache sync.Map // map[reflect.Type][]field
+
 // parseTags retrieves all attributes, relationships,
 // etc from the input value.
 //   - performs a breadth-first search over the value
@@ -398,6 +402,10 @@ func unmarshalField(v reflect.Value, r *resource, f field) error {
 //     encoding/json package to reduce heap allocs
 //     (see issue #1)
 func parseTags(v reflect.Value) ([]field, error) {
+	if fields, ok := fieldCache.Load(v.Type()); ok {
+		return fields.([]field), nil
+	}
+
 	// every element in the queue represents a
 	// struct, either a type or a value
 	type structElem struct {
@@ -416,11 +424,10 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 	// nb no allocations happen until needed
 	nextCount := map[reflect.Type]int{}
-	currentCount := map[reflect.Type]int{}
 
+	cache := true
 	for len(next) > 0 {
 		current, next = next, current[:0]
-		currentCount, nextCount = nextCount, currentCount
 		clear(nextCount)
 
 		// count struct fields
@@ -434,21 +441,20 @@ func parseTags(v reflect.Value) ([]field, error) {
 		next = slices.Grow(next, nfs)     // alloc
 
 		for _, c := range current {
-			if !c.ok {
-				if types[c.t] && !c.ok {
-					continue
-				}
-				if currentCount[c.t] > 1 {
-					continue
-				}
-			}
-
 			types[c.t] = true
 
 			for i := range c.t.NumField() {
 				f := c.t.Field(i) // alloc (!)
 
+				if !f.IsExported() && !f.Anonymous {
+					continue
+				}
+
 				typ, opts, ok := splitTypeAndOpts(f)
+
+				if typ == TagValueIgnore {
+					continue
+				}
 
 				fIdxs := make([]int, len(c.idxs)+1) // alloc
 				copy(fIdxs, c.idxs)
@@ -456,46 +462,46 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 				if !ok {
 					if f.Anonymous {
-						if c.ok {
-							fv, err := derefValue(c.v.Field(i))
-							if err != nil {
-								return nil, err
-							}
-
-							if fv.Kind() == reflect.Struct {
-								fvt := fv.Type()
-								next = append(next, structElem{fvt, fv, true, fIdxs}) // alloc
-								nextCount[fvt] = nextCount[fvt] + 1
-								continue
-							}
-
-							if fv.Kind() != reflect.Invalid {
-								continue
-							}
-
-							// value is a nil ptr to a struct type, so fall through
-							// and use the tags declared in the type instead
-						}
-
-						// only have a type, no value. so explore the field's type
 						ft := derefType(f.Type)
 						if ft.Kind() == reflect.Struct {
-							next = append(next, structElem{ft, reflect.Value{}, false, fIdxs})
-							nextCount[ft] = nextCount[ft] + 1
+							if !types[ft] && nextCount[ft] < 2 {
+								nextCount[ft] = nextCount[ft] + 1
+								if c.ok {
+									fv, err := derefValue(c.v.Field(i))
+									if err != nil {
+										return nil, err
+									}
+									if fv.Kind() == reflect.Struct {
+										next = append(next, structElem{ft, fv, true, fIdxs}) // alloc
+									}
+								} else {
+									next = append(next, structElem{ft, reflect.Value{}, false, fIdxs}) // alloc
+								}
+							}
+						}
+
+						if ft.Kind() == reflect.Interface {
+							cache = false
+							if c.ok {
+								fv, err := derefValue(c.v.Field(i))
+								if err != nil {
+									return nil, err
+								}
+
+								if fv.Kind() == reflect.Struct {
+									fvt := fv.Type()
+									if !types[fvt] && nextCount[fvt] < 2 {
+										next = append(next, structElem{fvt, fv, true, fIdxs}) // alloc
+										nextCount[fvt] = nextCount[fvt] + 1
+									}
+								}
+							}
 						}
 
 						continue
 					}
 
 					typ = TagValueAttr
-				}
-
-				if !f.IsExported() && !f.Anonymous {
-					continue
-				}
-
-				if typ == TagValueIgnore {
-					continue
 				}
 
 				tag, err := parseTag(f, typ, opts)
@@ -562,7 +568,13 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 		}
 	}
-	return fields[:nFiltered], nil
+
+	fields = fields[:nFiltered]
+	if enableFieldCache && cache {
+		fieldCache.Store(v.Type(), fields) // 4 allocs
+	}
+
+	return fields, nil
 }
 
 // getDominantField returns the highest precedence
