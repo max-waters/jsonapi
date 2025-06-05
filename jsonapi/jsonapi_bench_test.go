@@ -24,7 +24,7 @@ func BenchmarkResourceMarshalJSON_Empty(b *testing.B) {
 func BenchmarkResourceMarshalJSON(b *testing.B) {
 	b.ReportAllocs()
 
-	// currently: 18 allocations
+	// currently: 18 allocations, 16 of which are from json.Marshal
 	r := resource{
 		resourceIdentifier: resourceIdentifier{
 			Id: json.RawMessage([]byte(`"1"`)), Type: "type",
@@ -32,14 +32,14 @@ func BenchmarkResourceMarshalJSON(b *testing.B) {
 		Attributes: map[string]json.RawMessage{
 			"a": json.RawMessage([]byte(`"val"`)),
 		},
-		ToOneRelationships: map[string]*toOneRelationship{
+		ToOneRelationships: map[string]toOneRelationship{
 			"r1": {
 				Data: resourceIdentifier{
 					Id: json.RawMessage([]byte(`"1"`)), Type: "type",
 				},
 			},
 		},
-		ToManyRelationships: map[string]*toManyRelationship{
+		ToManyRelationships: map[string]toManyRelationship{
 			"r2": {
 				Data: []resourceIdentifier{
 					{Id: json.RawMessage([]byte(`"1"`)), Type: "type"},
@@ -65,12 +65,13 @@ func BenchmarkResourceMarshalJSON(b *testing.B) {
 func BenchmarkResourceUnmarshalJSON_Empty(b *testing.B) {
 	b.ReportAllocs()
 
-	// currently: 5 allocations
-	r := resource{}
+	// currently: 3 allocations
+
 	data := []byte(`{}`)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		r := resource{}
 		if err := r.UnmarshalJSON(data); err != nil {
 			b.Fatal(err)
 		}
@@ -80,12 +81,13 @@ func BenchmarkResourceUnmarshalJSON_Empty(b *testing.B) {
 func BenchmarkResourceUnmarshalJSON(b *testing.B) {
 	b.ReportAllocs()
 
-	// currently: 57 allocations
-	r := resource{}
+	// currently: 55 allocations, 35 from json.Unmarshal
+
 	data := []byte(`{"type":"type","id":"1","attributes":{"a":"val"},"relationships":{"r1":{"data":{"type":"type","id":"1"}},"r2":{"data":[{"type":"type","id":"1"}]}},"links":{"m":"val"},"meta":{"l":"val"}}`)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
+		r := resource{}
 		if err := r.UnmarshalJSON(data); err != nil {
 			b.Fatal(err)
 		}
@@ -330,7 +332,7 @@ func BenchmarkDeformat_ToOneRelationships(b *testing.B) {
 		b.Fatal(err)
 	}
 	r := resource{
-		ToOneRelationships: map[string]*toOneRelationship{
+		ToOneRelationships: map[string]toOneRelationship{
 			"name-a": {
 				Data: resourceIdentifier{
 					Type: "type-a",
@@ -373,7 +375,7 @@ func BenchmarkDeformat_ToManyRelationships(b *testing.B) {
 		b.Fatal(err)
 	}
 	r := resource{
-		ToManyRelationships: map[string]*toManyRelationship{
+		ToManyRelationships: map[string]toManyRelationship{
 			"name-a": {
 				Data: []resourceIdentifier{
 					{Type: "type-a", Id: json.RawMessage([]byte(`1`))},

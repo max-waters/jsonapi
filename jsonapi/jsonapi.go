@@ -106,8 +106,8 @@ type toManyRelationship struct {
 type resource struct {
 	resourceIdentifier
 	Attributes          map[string]json.RawMessage
-	ToOneRelationships  map[string]*toOneRelationship
-	ToManyRelationships map[string]*toManyRelationship
+	ToOneRelationships  map[string]toOneRelationship
+	ToManyRelationships map[string]toManyRelationship
 	Links               map[string]json.RawMessage
 	Meta                map[string]json.RawMessage
 }
@@ -116,8 +116,8 @@ func newResource() resource {
 	return resource{
 		resourceIdentifier:  resourceIdentifier{},
 		Attributes:          map[string]json.RawMessage{},
-		ToOneRelationships:  map[string]*toOneRelationship{},
-		ToManyRelationships: map[string]*toManyRelationship{},
+		ToOneRelationships:  map[string]toOneRelationship{},
+		ToManyRelationships: map[string]toManyRelationship{},
 		Meta:                map[string]json.RawMessage{},
 		Links:               map[string]json.RawMessage{},
 	}
@@ -148,7 +148,6 @@ func (r *resource) MarshalJSON() ([]byte, error) {
 			a.Relationships[k] = v
 		}
 	}
-
 	return json.Marshal(a)
 }
 
@@ -177,27 +176,51 @@ func (r *resource) UnmarshalJSON(data []byte) error {
 	r.Attributes = a.Attributes
 	r.Links = a.Links
 	r.Meta = a.Meta
-	r.ToOneRelationships = map[string]*toOneRelationship{}
-	r.ToManyRelationships = map[string]*toManyRelationship{}
+
+	nToOne := 0
+	nToMany := 0
+	for _, rel := range a.Relationships {
+		switch rel.Data[0] {
+		case '[':
+			nToMany++
+		case '{':
+			nToOne++
+		default:
+			return fmt.Errorf("cannot unmarshal into relationship data")
+		}
+	}
+
+	if nToMany > 0 {
+		r.ToManyRelationships = make(map[string]toManyRelationship, nToMany)
+	}
+	if nToOne > 0 {
+		r.ToOneRelationships = make(map[string]toOneRelationship, nToOne)
+	}
 
 	for name, rel := range a.Relationships {
 		switch rel.Data[0] {
 		case '[':
+			if r.ToManyRelationships == nil {
+
+			}
 			ids := []resourceIdentifier{}
 			if err := json.Unmarshal(rel.Data, &ids); err != nil {
 				return err
 			}
-			r.ToManyRelationships[name] = &toManyRelationship{
+			r.ToManyRelationships[name] = toManyRelationship{
 				Meta:  rel.Meta,
 				Data:  ids,
 				Links: rel.Links,
 			}
 		case '{':
+			if r.ToOneRelationships == nil {
+
+			}
 			id := resourceIdentifier{}
 			if err := json.Unmarshal(rel.Data, &id); err != nil {
 				return err
 			}
-			r.ToOneRelationships[name] = &toOneRelationship{
+			r.ToOneRelationships[name] = toOneRelationship{
 				Meta:  rel.Meta,
 				Data:  id,
 				Links: rel.Links,
@@ -734,7 +757,7 @@ func marshalToOneRel(v reflect.Value, r *resource, f field) error {
 		return &MarshalErr{f.tag.name, err}
 	}
 
-	r.ToOneRelationships[f.tag.name] = &toOneRelationship{
+	r.ToOneRelationships[f.tag.name] = toOneRelationship{
 		Data: resourceIdentifier{
 			Type: f.tag.rscType,
 			Id:   j,
@@ -744,7 +767,7 @@ func marshalToOneRel(v reflect.Value, r *resource, f field) error {
 }
 
 func marshalToManyRel(v reflect.Value, r *resource, f field) error {
-	r.ToManyRelationships[f.tag.name] = &toManyRelationship{
+	r.ToManyRelationships[f.tag.name] = toManyRelationship{
 		Data: make([]resourceIdentifier, v.Len()),
 	}
 
