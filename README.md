@@ -15,6 +15,14 @@ Planned feaures:
 
 ## Usage ##
 
+Import with 
+
+```
+import (
+	"github.com/max-waters/jsonapi"
+)
+```
+
 Two functions are exposed:
 
 ```Go
