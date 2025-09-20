@@ -161,7 +161,7 @@ JSON:API:
 
 ### Attributes ###
 
-An attribute is defined either by providing an `attr` tag, or `jsonapi` tag at all:
+An attribute is defined by providing either an `attr` tag, or no `jsonapi` tag at all:
 
 ```Go
 `jsonapi:"attr,{name},[options]"`
@@ -218,11 +218,11 @@ The `rel` tag defines a relationship:
 `jsonapi:"rel,{name},{type},[options]"`
 ```
 
-Any field annotated with a `rel` tag will be mapped to relationship with the key specified by `{name}`. If the `{name}` argument is empty, then the `encoding/json` default is used instead, ie either the name defined in the `json` tag, or the declared field name if none is found. 
+Any field annotated with a `rel` tag will be mapped to a relationship with the key specified by `{name}`. If the `{name}` argument is empty, then the `encoding/json` default is used instead, ie either the name defined in the `json` tag, or the declared field name if none is found. 
 
 The field's declared type determines whether it maps to a to-one or a to-many relationship. Array and slices (with the exception of `[]byte`), or pointers to these, will be mapped to a to-many relationship, and all other types are mapped to a to-one relationship. For to-one relationships, the field's value maps to the relationship's `"id"` field, and the `{type}` argument defines the `"type"` field. For to-many relationships, each element in the array or slice defines the `"id"` of a related resource. The IDs are marshaled and unmarshaled with the `encoding/json` package.
 
-As with `id` tags, the `string` option will encode floating point or integer IDs as JSON strings, allowing them to be used as valid JSON:API identifiers. And the `omitempty` option will exclude relationships with zero-valued valued IDs from the resulting JSON.
+While the `jsonapi` package does not (currently) enforce the JSON:API requirement that the `"id"` field be a string, the `string` option will encode floating point or integer IDs as JSON strings, allowing them to be used as valid JSON:API identifiers. And the `omitempty` option will exclude relationships with zero-valued valued IDs from the resulting JSON.
 
 #### Example To-One and To-Many Relationships with `string` option ####
 
@@ -315,6 +315,20 @@ The field's value will be mapped to a metadata item with the key specified by `{
 
 The `meta` tag supports the `string` and `omitempty` options, which encode numeric values as JSON strings, and omit zero-valued fields, respectively.
 
+### Links ###
+
+The `link` tag defines a link:
+
+```Go
+`jsonapi:"link,{name},[options]"`
+```
+
+The field's value will be mapped to a link with the key specified by `{name}`. If the `{name}` argument is empty, then the `encoding/json` default is used instead, ie either the name defined in the `json` tag, or the declared field name if none is found.  The field value is marshaled and unmarshaled with the `encoding/json` package.
+
+Note that the `jsonapi` package does not (currently) enforce the requirement that all links be either valid URIs or link objects.
+
+The `link` tag supports the `string` and `omitempty` options, which encode numeric values as JSON strings, and omit zero-valued fields, respectively.
+
 ## Anonymous Struct Fields ##
 
 Anonymous (ie, embedded) struct fields are "promoted" and treated as though their members are declared in their parent type:
@@ -351,11 +365,11 @@ JSON:API:
 }
 ```
 
-Names clashes are resolved with standard Go promotion rules, as used by the `encoding/json` package. If two or more `attr`, `rel` or `meta` fields have the same name, then a selection is made based on the fields' nesting depth, then the presence of a `jsonapi` tag, then the presence of a `json` tag. If no single preferred field is found, then all clashing fields are excluded from the marhsaling and unmarshaling.
+Names clashes are resolved with standard Go promotion rules, as used by the `encoding/json` package. If two or more `attr`, `rel` or `meta` fields have the same name, then a selection is made based on the fields' nesting depth, then the presence of a `jsonapi` tag, then the presence of a `json` tag. If no single preferred field is found, then all clashing fields are excluded from the marshaling and unmarshaling.
 
 ## Customising Resource Marshaling and Unmarshaling ##
 
-The `jsonapi` package provides two interfaces and an intermediate structure to help with custom marshaling and unmarshaling.
+The `jsonapi` package provides two interfaces and a number of functional options to help with custom marshaling and unmarshaling.
 
 ### `ResourceMarshaler` and `ResourceUnmarshaler` ###
 
@@ -418,76 +432,76 @@ func (a *Article) UnmarshalJsonApiResource(data []byte) error {
 }
 ```
 
-### The intermediate `Resource` type ###
+### Custom Link Marshaling with Functional Options ###
 
-The `Resource` type has fields that correspond directly the JSON:API ID, attributes, relationships and metadata, and so can be directly marshaled and unmarshaled to and from JSON:API formatted JSON:
+The functional options `WithResourceLinker` and `WithRelationshipLinker` allow for resource and relationship links to be generated from struct tags as well as information not contained in the resource.
+
+The `WithResourceLinker` option accepts a function with the signature `func(a any, r jsonapi.ResourceIdentifier) (map[string]jsonapi.Link, error)` that should return all links for the supplied resource and JSON:API id. The function will be called for every resource.
+
+The `WithRelationshipLinker` option accepts a function with the signature `func(r any, id jsonapi.ResourceIdentifier, rel string, toOne bool, data ...jsonapi.ResourceIdentifier) (map[string]jsonapi.Link, error)` that should return all links for the supplied relationship on the supplied resource. The function will be called for every relationship on every resource.
+
+#### Example `WithResourceLinker` and `WithRelationshipLinker` Function ####
+
+In this example, `self` and `related` links are generated from the type names declared in the resource's struct tags and a pre-configured URL base:
 
 ```Go
-type Resource struct {
-    ResourceIdentifier
-    Attributes          map[string]json.RawMessage
-    ToOneRelationships  map[string]*ToOneResourceLinkage
-    ToManyRelationships map[string]*ToManyResourceLinkage
-    Links               map[string]*Link
+func InitResourceLinker(urlBase string) jsonapi.ResourceLinker {
+	return func(r any, id jsonapi.ResourceIdentifier) (map[string]jsonapi.Link, error) {
+		return map[string]jsonapi.Link{
+			"self": jsonapi.LinkUri{Uri: fmt.Sprintf("%s/%s/%s", urlBase, id.Type, id.Id)},
+		}, nil
+	}
 }
-```
 
-The `FormatResource` and `DeformatResource` functions convert a struct to a `Resource` instance, and vice versa, respectively:
+func InitRelationshipLinker(urlBase string) jsonapi.RelationshipLinker {
+	return func(r any, id jsonapi.ResourceIdentifier, rel string, toOne bool, data ...jsonapi.ResourceIdentifier) (map[string]jsonapi.Link, error) {
+		return map[string]Link{
+			"self":    jsonapi.LinkUri{Uri: fmt.Sprintf("%s/%s/%s/relationships/%s", urlBase, id.Type, id.Id, rel)},
+			"related": jsonapi.LinkUri{Uri: fmt.Sprintf("%s/%s/%s/%s", urlBase, id.Type, id.Id, rel)},
+		}, nil
+	}
+}
 
-```GO
-func FormatResource(a any) (*Resource, error)
-func DeformatResource(r *Resource, a any) error
-```
-
-This allows for further customisation of marshaling and unmarshaling.
-
-#### Example marshaling with the `Resource` type ####
-
-In this example, the `Article` type stores its metadata in an arbitrary map. It first formats itself as a `Resource`, marshals the metadata fields, and then marshals the `Resource` instance:
-
-```Go
 type Article struct {
-    Title    string `jsonapi:"attr,title"`
-    Metadata map[string]interface{}
+    ID       int
+    Comments []int
 }
 
-func (a *Article) MarshalJsonApiResource() ([]byte, error) {
-    r, err := FormatResource(a)
-    if err != nil {
-        return nil, err
-    }
-
-    for key, value := range a.Metadata {
-        b, err := json.Marshal(value)
-        if err != nil {
-          return nil, err
-        }
-        r.Meta[key] = json.RawMessage(b)
-    }
-
-    return json.Marshal(r)
+a := Article{
+    Id: 4,
+    Comments: []int{5}
 }
 
-func (a *Article) UnmarshalJsonApiResource(data []byte) error {
-    r := &Resource{}
-    if err := json.Unmarshal(data, r); err != nil {
-        return err
-    }
+urlBase := "https://example.com"
 
-    if err := DeformatResource(r, a); err != nil {
-        return err
-    }
-
-    a.Metadata = map[string]interface{}{}
-    for k, v := range r.Meta {
-        var i interface{}
-        if err := json.Unmarshal(v, &i); err != nil {
-          return err
-        }
-        a.Metadata[k] = i
-    }
-    return nil
-}
+jsonapi.MarshalResource(a, 
+  jsonapi.WithResourceLinker(InitResourceLinker(urlBase)),
+  jsonapi.WithRelationshipLinker(InitRelationshipLinker(urlBase)),
+)
 ```
 
+JSON:API:
 
+```JSON
+{
+  "type": "articles",
+  "id": "4",
+  "relationships": {
+    "comments": {
+      "data": [ 
+        { 
+          "type": "comment", 
+          "id": 5 
+        } 
+      ],
+      "links": {
+        "related": "https://example.com/articles/4/comments",
+        "self": "https://example.com/articles/4/relationships/comments"
+      }
+    }
+  },
+  "links": {
+    "self": "https://example.com/articles/4"
+  }
+}
+```

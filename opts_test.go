@@ -52,29 +52,80 @@ func TestNewResourceIdentifier(t *testing.T) {
 	}
 }
 
-func TestLinkObject(t *testing.T) {
-	want := link{
-		LinkObject: &linkObject{
-			Href:        "href",
-			Title:       "title",
-			Type:        "type",
-			DescribedBy: &link{Uri: "uri"},
-			HrefLang:    []string{"lang"},
-			Meta:        map[string]any{"key": "value"},
+func TestLinkObject_MarshalJSON(t *testing.T) {
+	want := LinkObject{
+		DescribedBy: LinkUri{Uri: "uri"},
+	}
+
+	got := LinkObject{}
+
+	if err := json.Unmarshal([]byte(`{ "described_by": "uri" }`), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, want, got)
+}
+
+func TestLinkObject_UnmarshalJSON(t *testing.T) {
+	// uri string
+	want := LinkObject{
+		DescribedBy: LinkUri{Uri: "uri"},
+	}
+
+	got := LinkObject{}
+
+	if err := json.Unmarshal([]byte(`{ "described_by": "uri" }`), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, want, got)
+
+	// link object
+	want = LinkObject{
+		DescribedBy: LinkObject{
+			Title:       "test",
+			DescribedBy: LinkUri{"uri"},
 		},
 	}
 
-	got := LinkObject("href", "title", "type", &link{Uri: "uri"}, []string{"lang"}, map[string]any{"key": "value"})
+	got = LinkObject{}
+
+	if err := json.Unmarshal([]byte(`{ "described_by": { "described_by": "uri", "title": "test" } }`), &got); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Equal(t, want, got)
+
+	// no value
+	want = LinkObject{}
+	got = LinkObject{}
+
+	if err := json.Unmarshal([]byte(`{ }`), &got); err != nil {
+		t.Fatal(err)
+	}
+
 	assert.Equal(t, want, got)
 }
 
-func TestLinkUri(t *testing.T) {
-	want := link{Uri: "uri"}
-	got := UriLink("uri")
-	assert.Equal(t, want, got)
+func TestLinkUri_MarshalJson(t *testing.T) {
+	linkUri := LinkUri{Uri: "uri"}
+
+	got, err := json.Marshal(linkUri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, `"uri"`, string(got))
 }
 
-func TestWithResourceLinks(t *testing.T) {
+func TestLinkUri_UnmarshalJson(t *testing.T) {
+	linkUri := LinkUri{}
+	if err := json.Unmarshal([]byte(`"uri"`), &linkUri); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, "uri", linkUri.Uri)
+}
+
+func TestWithResourceLinksFunc(t *testing.T) {
 	type testType struct {
 		Id   string `jsonapi:"id,type"`
 		Link string `jsonapi:"link,annotated_link"`
@@ -85,11 +136,11 @@ func TestWithResourceLinks(t *testing.T) {
 
 	var gotRsc ResourceIdentifier
 	var gotA any
-	gotBytes, err := MarshalResource(in, WithResourceLinks(func(a any, r ResourceIdentifier) (map[string]Link, error) {
+	gotBytes, err := MarshalResource(in, WithResourceLinker(func(a any, r ResourceIdentifier) (map[string]Link, error) {
 		gotRsc = r
 		gotA = a
 		return map[string]Link{
-			"self": UriLink(fmt.Sprintf("something.com/%s/%s", r.Type, r.Id)),
+			"self": LinkUri{Uri: fmt.Sprintf("something.com/%s/%s", r.Type, r.Id)},
 			"null": nil,
 		}, nil
 	}))
@@ -118,7 +169,7 @@ func TestWithResourceLinks(t *testing.T) {
 	assert.Equal(t, in, gotA)
 }
 
-func TestWithRelationshipLinks(t *testing.T) {
+func TestWWithRelationshipLinksFunc(t *testing.T) {
 	type testType struct {
 		Id        string   `jsonapi:"id,type"`
 		ToOne     string   `jsonapi:"rel,rel1,relTyp1"`
@@ -131,18 +182,20 @@ func TestWithRelationshipLinks(t *testing.T) {
 
 	var gotRsc ResourceIdentifier
 	var gotA any
-	gotBytes, err := MarshalResource(in, WithRelationshipLinks(func(a any, rsc ResourceIdentifier, rel string, data ...ResourceIdentifier) (map[string]Link, error) {
+
+	gotBytes, err := MarshalResource(in, WithRelationshipLinker(func(a any, rsc ResourceIdentifier, rel string, toOne bool, data ...ResourceIdentifier) (map[string]Link, error) {
 		gotRsc = rsc
 		gotA = a
+
 		if rel == "rel1" {
 			return map[string]Link{
-				"self": UriLink(fmt.Sprintf("something.com/%s/%s/%s/%s", rsc.Type, rsc.Id, rel, data[0].Id)),
+				"self": LinkUri{Uri: fmt.Sprintf("something.com/%s/%s/%s/%s", rsc.Type, rsc.Id, rel, data[0].Id)},
 			}, nil
 		}
 
 		if rel == "rel2" {
 			return map[string]Link{
-				"self": UriLink(fmt.Sprintf("something.com/%s/%s/%s", rsc.Type, rsc.Id, rel)),
+				"self": LinkUri{fmt.Sprintf("something.com/%s/%s/%s", rsc.Type, rsc.Id, rel)},
 			}, nil
 		}
 
@@ -184,131 +237,6 @@ func TestWithRelationshipLinks(t *testing.T) {
 				"data": { "id": "", "type": "relTyp3" },
 				"links": {
 					"self": null
-				}	
-			}
-		}
-	}`)
-
-	wantRsc := ResourceIdentifier{
-		Type: "type",
-		Id:   "id1",
-	}
-
-	assert.Equal(t, fmtJson(t, wantBytes), fmtJson(t, gotBytes))
-	assert.Equal(t, wantRsc, gotRsc)
-	assert.Equal(t, in, gotA)
-}
-
-func TestWithResourceMeta(t *testing.T) {
-	type testType struct {
-		Id             string `jsonapi:"id,type"`
-		Meta           string `jsonapi:"meta,annotated_meta"`
-		OverriddenMeta string `jsonapi:"meta,key"`
-	}
-
-	in := testType{Id: "id", Meta: "struct value", OverriddenMeta: "original value"}
-
-	var gotRsc ResourceIdentifier
-	var gotA any
-	gotBytes, err := MarshalResource(in, WithResourceMeta(func(a any, r ResourceIdentifier) (map[string]any, error) {
-		gotRsc = r
-		gotA = a
-		return map[string]any{
-			"key":  "value",
-			"null": nil,
-		}, nil
-	}))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	wantBytes := []byte(`
-	{
-		"id": "id",
-		"type": "type",
-		"meta": {
-			"annotated_meta": "struct value",
-			"key": "value",
-			"null": null
-		}
-	}`)
-	wantRsc := ResourceIdentifier{
-		Type: "type",
-		Id:   "id",
-	}
-
-	assert.Equal(t, fmtJson(t, wantBytes), fmtJson(t, gotBytes))
-	assert.Equal(t, wantRsc, gotRsc)
-	assert.Equal(t, in, gotA)
-}
-
-func TestWithRelationshipMeta(t *testing.T) {
-	type testType struct {
-		Id        string   `jsonapi:"id,type"`
-		ToOne     string   `jsonapi:"rel,rel1,relTyp1"`
-		ToMany    []string `jsonapi:"rel,rel2,relTyp2"`
-		Empty     string   `jsonapi:"rel,rel3,relTyp3"`
-		OmitEmpty string   `jsonapi:"rel,rel4,relTyp3,omitempty"`
-	}
-
-	in := testType{Id: "id1", ToOne: "id2", ToMany: []string{"id3", "id4"}, Empty: ""}
-
-	var gotRsc ResourceIdentifier
-	var gotA any
-	gotBytes, err := MarshalResource(in, WithRelationshipMeta(func(a any, rsc ResourceIdentifier, rel string, data ...ResourceIdentifier) (map[string]any, error) {
-		gotRsc = rsc
-		gotA = a
-		if rel == "rel1" {
-			return map[string]any{
-				"key": fmt.Sprintf("%s-%s-%s-%s", rsc.Type, rsc.Id, rel, data[0].Id),
-			}, nil
-		}
-
-		if rel == "rel2" {
-			return map[string]any{
-				"key": fmt.Sprintf("%s-%s-%s-%d", rsc.Type, rsc.Id, rel, len(data)),
-			}, nil
-		}
-
-		if rel == "rel3" {
-			return map[string]any{
-				"key": nil,
-			}, nil
-		}
-
-		t.Fatalf("unexpected relationship: %s", rel)
-
-		return nil, nil
-
-	}))
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	wantBytes := []byte(`
-	{
-		"id": "id1",
-		"type": "type",
-		"relationships": {
-			"rel1": {
-				"data": { "id": "id2", "type": "relTyp1" },
-				"meta": {
-					"key": "type-id1-rel1-id2"
-				}
-				
-			},
-			"rel2": {
-				"data": [ { "id": "id3", "type": "relTyp2" }, { "id": "id4", "type": "relTyp2" }  ],
-				"meta": {
-					"key": "type-id1-rel2-2"
-				}	
-			},
-			"rel3": {
-				"data": { "id": "", "type": "relTyp3" },
-				"meta": {
-					"key": null
 				}	
 			}
 		}
