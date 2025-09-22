@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+type marshalResourceOpts struct {
+	resourceLinks     ResourceLinker
+	relationshipLinks RelationshipLinker
+}
+
+type marshalResourceOpt func(opts marshalResourceOpts) marshalResourceOpts
+
 // ResourceIdentifier represents a JSON:API resource identifier.
 type ResourceIdentifier struct {
 	Type string
@@ -35,108 +42,103 @@ type Link interface {
 	linkTag()
 }
 
-type link struct {
-	Uri        string
-	LinkObject *linkObject
-}
-
-func (link) linkTag() {}
-
-type linkObject struct {
-	Href        string         `json:"href"`
-	DescribedBy *link          `json:"described_by,omitempty"`
+// LinkObject represents a JSON:API object link.
+type LinkObject struct {
+	Href        string         `json:"href,omitempty"`
+	DescribedBy Link           `json:"described_by,omitempty"`
 	Title       string         `json:"title,omitempty"`
 	Type        string         `json:"type,omitempty"`
 	HrefLang    []string       `json:"hreflang,omitempty"`
 	Meta        map[string]any `json:"meta,omitempty"`
 }
 
-// UriLink returns a Link that represents a uri reference.
-func UriLink(uri string) Link {
-	return link{Uri: uri}
-}
+func (LinkObject) linkTag() {}
 
-// LinkObject returns Link represnting a link object.
-func LinkObject(href, title, linkType string, describedBy Link, hrefLang []string, meta map[string]any) Link {
-	return link{
-		LinkObject: &linkObject{
-			Href:        href,
-			DescribedBy: describedBy.(*link),
-			Title:       title,
-			Type:        linkType,
-			HrefLang:    hrefLang,
-			Meta:        meta,
-		},
+func (l *LinkObject) UnmarshalJSON(data []byte) error {
+	type alias LinkObject
+
+	type proxy struct {
+		alias
+		DescribedBy json.RawMessage `json:"described_by,omitempty"`
 	}
-}
 
-func (l link) MarshalJSON() ([]byte, error) {
-	if l.Uri != "" && l.LinkObject != nil {
-		return nil, fmt.Errorf("uri and object defined")
+	a := proxy{
+		alias: alias(*l),
 	}
-	if l.Uri != "" {
-		return json.Marshal(l.Uri)
+
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
 	}
-	return json.Marshal(l.LinkObject)
-}
 
-func (l link) UnmarshalJSON(data []byte) error {
-	switch data[0] {
-	case '"':
-		return json.Unmarshal(data, &l.Uri)
-	case '{':
-		return json.Unmarshal(data, &l.LinkObject)
-	default:
-		return fmt.Errorf("cannot unmarshal into link data")
+	*l = LinkObject(a.alias)
+
+	if len(a.DescribedBy) > 0 {
+		switch a.DescribedBy[0] {
+		case '"':
+			linkUri := LinkUri{}
+			if err := json.Unmarshal(a.DescribedBy, &linkUri); err != nil {
+				return err
+			}
+			l.DescribedBy = linkUri
+		case '{':
+			linkObj := LinkObject{}
+			if err := json.Unmarshal(a.DescribedBy, &linkObj); err != nil {
+				return err
+			}
+			l.DescribedBy = linkObj
+		default:
+			return fmt.Errorf("cannot unmarshal \"described_by\", unexpected byte %d", a.DescribedBy)
+		}
 	}
+
+	return nil
 }
 
-type ResourceLinks func(a any, r ResourceIdentifier) (map[string]Link, error)
-type RelationshipLinks func(a any, r ResourceIdentifier, relationship string, data ...ResourceIdentifier) (map[string]Link, error)
-
-type marshalResourceOpts struct {
-	resourceLinks     ResourceLinks
-	relationshipLinks RelationshipLinks
-	resourceMeta      ResourceMeta
-	relationshipMeta  RelationshipMeta
+// LinkObject represents a JSON:API URI-reference link.
+type LinkUri struct {
+	Uri string
 }
 
-type marshalResourceOpt func(opts marshalResourceOpts) marshalResourceOpts
+func (LinkUri) linkTag() {}
 
-func WithResourceLinks(links ResourceLinks) marshalResourceOpt {
+func (l LinkUri) MarshalJSON() ([]byte, error) {
+	return json.Marshal(l.Uri)
+}
+
+func (l *LinkUri) UnmarshalJSON(data []byte) error {
+	return json.Unmarshal(data, &l.Uri)
+}
+
+// A ResourceLinker should return all links for
+// resource r with JSON:API formatted identifier id.
+type ResourceLinker func(r any, id ResourceIdentifier) (map[string]Link, error)
+
+// A RelationshipLinker should return all links for the given
+// relationship, where r is the parent resource with JSON:API
+// formatted identifier id, rel is the name of the relationship
+// and data is the JSON:API formatted identifiers for all related data.
+type RelationshipLinker func(r any, id ResourceIdentifier, rel string, toOne bool, data ...ResourceIdentifier) (map[string]Link, error)
+
+// WithResourceLinks returns a resource marshaling option that will
+// retrieve resource links with the supplied function.
+func WithResourceLinker(links ResourceLinker) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
 		opts.resourceLinks = links
 		return opts
 	}
 }
 
-func WithRelationshipLinks(links RelationshipLinks) marshalResourceOpt {
+// WithRelationshipLinker returns a resource marshaling option that will
+// retrieve relationship links with the supplied function.
+func WithRelationshipLinker(links RelationshipLinker) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
 		opts.relationshipLinks = links
 		return opts
 	}
 }
 
-type ResourceMeta func(a any, r ResourceIdentifier) (map[string]any, error)
-type RelationshipMeta func(a any, r ResourceIdentifier, relationship string, data ...ResourceIdentifier) (map[string]any, error)
-
-func WithResourceMeta(meta ResourceMeta) marshalResourceOpt {
-	return func(opts marshalResourceOpts) marshalResourceOpts {
-		opts.resourceMeta = meta
-		return opts
-	}
-}
-
-func WithRelationshipMeta(meta RelationshipMeta) marshalResourceOpt {
-	return func(opts marshalResourceOpts) marshalResourceOpts {
-		opts.relationshipMeta = meta
-		return opts
-	}
-}
-
 func applyMarshalOpts(a any, r resource, opts marshalResourceOpts) error {
-	if opts.resourceLinks == nil && opts.relationshipLinks == nil &&
-		opts.resourceMeta == nil && opts.relationshipMeta == nil {
+	if opts.resourceLinks == nil && opts.relationshipLinks == nil {
 		return nil
 	}
 
@@ -159,7 +161,7 @@ func applyMarshalOpts(a any, r resource, opts marshalResourceOpts) error {
 
 	if opts.relationshipLinks != nil {
 		for relName, rel := range r.ToOneRelationships {
-			links, err := opts.relationshipLinks(a, rscId, relName, newResourceIdentifier(rel.Data))
+			links, err := opts.relationshipLinks(a, rscId, relName, true, newResourceIdentifier(rel.Data))
 			if err != nil {
 				return fmt.Errorf("adding links for relationship %s: %w", relName, err)
 			}
@@ -176,58 +178,12 @@ func applyMarshalOpts(a any, r resource, opts marshalResourceOpts) error {
 				data[i] = newResourceIdentifier(d)
 			}
 
-			links, err := opts.relationshipLinks(a, rscId, relName, data...)
+			links, err := opts.relationshipLinks(a, rscId, relName, false, data...)
 			if err != nil {
 				return fmt.Errorf("adding links for relationship %s: %w", relName, err)
 			}
 
 			rel.Links, err = formatMap(links)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	if opts.resourceMeta != nil {
-		meta, err := opts.resourceMeta(a, rscId)
-		if err != nil {
-			return fmt.Errorf("adding resource meta: %w", err)
-		}
-
-		for name, m := range meta {
-			l, err := json.Marshal(m)
-			if err != nil {
-				return &MarshalErr{Field: name, Err: err}
-			}
-			r.Meta[name] = l
-		}
-	}
-
-	if opts.relationshipMeta != nil {
-		for relName, rel := range r.ToOneRelationships {
-			meta, err := opts.relationshipMeta(a, rscId, relName, newResourceIdentifier(rel.Data))
-			if err != nil {
-				return fmt.Errorf("adding meta for relationship %s: %w", relName, err)
-			}
-
-			rel.Meta, err = formatMap(meta)
-			if err != nil {
-				return err
-			}
-		}
-
-		for relName, rel := range r.ToManyRelationships {
-			data := make([]ResourceIdentifier, len(rel.Data))
-			for i, d := range rel.Data {
-				data[i] = newResourceIdentifier(d)
-			}
-
-			meta, err := opts.relationshipMeta(a, rscId, relName, data...)
-			if err != nil {
-				return fmt.Errorf("adding meta for relationship %s: %w", relName, err)
-			}
-
-			rel.Meta, err = formatMap(meta)
 			if err != nil {
 				return err
 			}
