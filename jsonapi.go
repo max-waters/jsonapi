@@ -1,3 +1,4 @@
+// Package jsonapi marshals and unmarshals JSON:API v1.1 formatted JSON.
 package jsonapi
 
 import (
@@ -31,6 +32,8 @@ const (
 
 var nullJson = json.RawMessage([]byte("null"))
 
+// A TagError describes an unknown or incorrectly formatted
+// jsonapi struct tag.
 type TagError struct {
 	Field string
 	Err   error
@@ -40,6 +43,8 @@ func (e *TagError) Error() string {
 	return "tag error on field '" + e.Field + "': " + e.Err.Error()
 }
 
+// An UnmarshalError describes an error returned by the underlying
+// JSON unmarshaling library.
 type UnmarshalError struct {
 	Field string
 	Err   error
@@ -49,6 +54,8 @@ func (e *UnmarshalError) Error() string {
 	return "unmarshal error on field '" + e.Field + "': " + e.Err.Error()
 }
 
+// A MarshalError describes an error returned by the underlying
+// JSON marshaling library.
 type MarshalError struct {
 	Field string
 	Err   error
@@ -58,6 +65,8 @@ func (e *MarshalError) Error() string {
 	return "marshal error on field '" + e.Field + "': " + e.Err.Error()
 }
 
+// A FieldTypeError describes a Go struct field of a type that
+// cannot be marshaled to, or unmarshaled from, JSON:API.
 type FieldTypeError struct {
 	Field string
 	Kind  reflect.Kind
@@ -67,6 +76,11 @@ func (e *FieldTypeError) Error() string {
 	return "unsupported type on field '" + e.Field + "': " + e.Kind.String()
 }
 
+// A ResourceTypeError describes a Go type that cannot be be marshaled to,
+// or unmarshaled from, a JSON:API [resource] (ie, not a struct, or does not
+// implement [ResourceMarshaler] or [ResourceUnmarshaler]).
+//
+// [resource]: https://jsonapi.org/format/#document-resource-objects
 type ResourceTypeError struct {
 	Type reflect.Type
 }
@@ -78,6 +92,8 @@ func (e *ResourceTypeError) Error() string {
 	return "unsupported resource type: nil"
 }
 
+// An IllegalUnmarshalError describes an illegal input to [UnmarshalResource]
+// (ie, not a pointer, or nil).
 type IllegalUnmarshalError struct {
 	Value reflect.Value
 }
@@ -89,6 +105,7 @@ func (e *IllegalUnmarshalError) Error() string {
 	return "nil"
 }
 
+// A SelfReferentialPointerError describes a loop of pointers.
 type SelfReferentialPointerError struct {
 	Value reflect.Value
 }
@@ -97,10 +114,14 @@ func (e *SelfReferentialPointerError) Error() string {
 	return "self-referential pointer: " + e.Value.String()
 }
 
+// ResourceUnmarshaler is the interface implemented by types that
+// can unmarshal themselves from JSON:API-formatted JSON.
 type ResourceUnmarshaler interface {
 	UnmarshalJsonApiResource([]byte) error
 }
 
+// ResourceMarshaler is the interface implemented by types that
+// can marshal themselves into JSON:API-formatted JSON.
 type ResourceMarshaler interface {
 	MarshalJsonApiResource() ([]byte, error)
 }
@@ -234,6 +255,68 @@ func (r *resource) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MashalResource returns the JSON:API encoding of [resource] a.
+//
+// If a is nil or not a valid Resource type (ie is neither a struct nor a [ResourceMarshaler])
+// then a [ResourceTypeError] is returned.
+//
+// If a implements [ResourceMarshaler], then its [ResourceMarshaler.MarshalJsonApiResource]
+// function is called.
+//
+// Otherwise, the encoding of each of a's struct fields is defined by the the "jsonapi" key
+// in the field's tag.
+// The tag's first element specifies the field's destination in the
+// resource, and must be either `id`, `attr`, `rel`, `meta`, `link` or `-`.
+// An `id` specification must be followed by a type (eg `jsonapi:"id,my-type"`),
+// a `rel` specification must be followed by a name and type (eg `jsonapi:"rel,my-name,my-type"`),
+// and the `attr`, `meta` and `link` specifications may be followed by a name (eg `jsonapi:"attr,my-name"`).
+// The `-` specification indicates that the field should be ignored.
+//
+// A field with no tag defaults to `attr`, and an empty or unspecified name will default to the field name.
+// Fields can be excluded
+//
+// All specifications can then be followed by a comma-separated list of options.
+// The "omitempty" option specifies that the field should be omitted
+// from the Resource if the field has an empty value, as in the encoding/json
+// package.
+//
+// The "string" option signals that a floating point, integer, or boolean
+// type should be encoded as a string. This is useful for using int or UUID
+// fields as resource IDs.
+//
+// Some struct tag examples:
+//
+// // Field appears as the `id` field, converted to a string.
+// // Additionally, a `type` field will be added with value `my-type`.
+// Field int `jsonapi:"id,my-type,string"`
+//
+// // Field appears as an attribute with name `my-name`.
+// Field int `jsonapi:"attr,my-name,omitempty"`
+//
+// Field appears as an attribute with name `my-name`.
+// Field int `json:"my-name"`
+//
+// Field is excluded from the resource entirely:
+// Field int `jsonapi:"-"`
+//
+// // Field appears as the "id" of a to-one relationship, with name `my-name`, and type `my-type`.
+// Field int `jsonapi:"attr,my-name,my-type,string"`
+//
+// // Field elements appear as the "id" fields of a to-many relationship, with name `my-name`, and type `my-type`.
+// Field []int `jsonapi:"attr,my-name,my-type,string"`
+//
+// // Field appears as an meta item with name `my-name`.
+// Field int `jsonapi:"meta,my-name"`
+//
+// // Field appears as a link with name `my-name`.
+// Field int `jsonapi:"link,my-name"`
+//
+// Embedded struct fields without a jsonapi tag are marshaled as if their inner exported fields
+// were fields in the outer struct, subject to the same visibility rules defined in
+// the  `encoding/json` package.
+// Embedded struct fields with a tag are treated as though they are not embedded.
+//
+// [resource]: https://jsonapi.org/format/#document-resource-objects
 func MarshalResource(a any, opts ...marshalResourceOpt) ([]byte, error) {
 	marshalOpts := marshalResourceOpts{}
 	for _, opt := range opts {
@@ -330,6 +413,19 @@ func marshalField(v reflect.Value, r *resource, f field) error {
 	return nil
 }
 
+// UnmarshalResource parses the JSON:API-formatted [resource] data and stores
+// the result in the value pointed to by a.
+// If a is nil or not a pointer, an [IllegalUnmarshalError] is returned.
+// If a does not point to a struct type or a [ResourceUnmarshaler], a
+// [ResourceTypeError] is returned.
+//
+// If a implements [ResourceUnmarshaler], then its [ResourceUnmarshaler.UnmarshalJsonApiResource]
+// function is called.
+//
+// Otherwise, a's struct fields are decoded using struct tag and embedding rules
+// equivalent to those used by [MarshalResource].
+//
+// [resource]: https://jsonapi.org/format/#document-resource-objects
 func UnmarshalResource(data []byte, a any) error {
 	v, err := derefUnmarshalInput(a)
 	if err != nil {

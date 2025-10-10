@@ -12,7 +12,9 @@ type marshalResourceOpts struct {
 
 type marshalResourceOpt func(opts marshalResourceOpts) marshalResourceOpts
 
-// ResourceIdentifier represents a JSON:API resource identifier.
+// A ResourceIdentifier represents a JSON:API [resource identifier].
+//
+// [resource identifier]: https://jsonapi.org/format/#document-resource-identifier-objects
 type ResourceIdentifier struct {
 	Type string
 	Id   string
@@ -42,7 +44,9 @@ type Link interface {
 	linkTag()
 }
 
-// LinkObject represents a JSON:API object link.
+// A LinkObject represents a JSON:API [object link].
+//
+// [object link]: https://jsonapi.org/format/#auto-id--link-objects
 type LinkObject struct {
 	Href        string         `json:"href,omitempty"`
 	DescribedBy Link           `json:"described_by,omitempty"`
@@ -94,7 +98,9 @@ func (l *LinkObject) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// LinkObject represents a JSON:API URI-reference link.
+// A LinkUri represents a JSON:API [URI-reference link].
+//
+// [URI-reference link]: https://jsonapi.org/format/#document-links
 type LinkUri struct {
 	Uri string
 }
@@ -109,18 +115,42 @@ func (l *LinkUri) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &l.Uri)
 }
 
-// A ResourceLinker should return all links for
-// resource r with JSON:API formatted identifier id.
+// A ResourceLinker function should return all links for the
+// supplied resource. Input r is the value passed to [MarshalResource],
+// and id is the [ResourceIdentifier] extracted from r.
+// Can be used with [WithResourceLinker] to set links that
+// are not present in the struct passed to [MarshalResource].
+//
+// Example:
+//
+//	func MyResourceLinker(r any, id ResourceIdentifier) (map[string]Link, error) {
+//		return map[string]Link{
+//			"self": LinkUri{
+//				Uri: fmt.Sprintf("https://example.com/%s/%s", id.Type, id.Id),
+//			},
+//		}, nil
+//	}
 type ResourceLinker func(r any, id ResourceIdentifier) (map[string]Link, error)
 
-// A RelationshipLinker should return all links for the given
-// relationship, where r is the parent resource with JSON:API
-// formatted identifier id, rel is the name of the relationship
-// and data is the JSON:API formatted identifiers for all related data.
+// A RelationshipLinker function should return all links for the given
+// relationship, on the given resource. Input r is the value passed to [MarshalResource],
+// id is the [ResourceIdentifier] extracted from r, rel is the relationship name,
+// toOne indicates if the relationship is toOne or toMany, and data contains a
+// [ResourceIdentifier] for each related resource.
+// Can be used with [WithRelationshipLinker] to set links that
+// are not present in the struct passed to [MarshalResource].
+//
+// Example:
+//
+//	func MyRelationshipLinker(r any, id ResourceIdentifier, rel string, toOne bool, data ...ResourceIdentifier) (map[string]Link, error) {
+//		return map[string]Link{
+//			"related": LinkUri{Uri: fmt.Sprintf("https://example.com/%s/%s/%s", id.Type, id.Id, rel)},
+//		}, nil
+//	}
 type RelationshipLinker func(r any, id ResourceIdentifier, rel string, toOne bool, data ...ResourceIdentifier) (map[string]Link, error)
 
-// WithResourceLinks returns a resource marshaling option that will
-// retrieve resource links with the supplied function.
+// WithResourceLinker returns a resource marshaling option that will
+// set resource links to those returned by the suppled [ResourceLinker] function.
 func WithResourceLinker(links ResourceLinker) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
 		opts.resourceLinks = links
@@ -129,7 +159,8 @@ func WithResourceLinker(links ResourceLinker) marshalResourceOpt {
 }
 
 // WithRelationshipLinker returns a resource marshaling option that will
-// retrieve relationship links with the supplied function.
+// set links on relationships to those returned by the
+// the supplied [RelationshipLinker] function.
 func WithRelationshipLinker(links RelationshipLinker) marshalResourceOpt {
 	return func(opts marshalResourceOpts) marshalResourceOpts {
 		opts.relationshipLinks = links
