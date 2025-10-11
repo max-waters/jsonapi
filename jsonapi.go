@@ -29,49 +29,73 @@ const (
 	TagValueString    = "string"
 )
 
-var NullJson = json.RawMessage([]byte("null"))
+var nullJson = json.RawMessage([]byte("null"))
 
-type TagErr struct {
+type TagError struct {
 	Field string
 	Err   error
 }
 
-func (e *TagErr) Error() string {
+func (e *TagError) Error() string {
 	return "tag error on field '" + e.Field + "': " + e.Err.Error()
 }
 
-type UnmarshalErr struct {
+type UnmarshalError struct {
 	Field string
 	Err   error
 }
 
-func (e *UnmarshalErr) Error() string {
+func (e *UnmarshalError) Error() string {
 	return "unmarshal error on field '" + e.Field + "': " + e.Err.Error()
 }
 
-type MarshalErr struct {
+type MarshalError struct {
 	Field string
 	Err   error
 }
 
-func (e *MarshalErr) Error() string {
+func (e *MarshalError) Error() string {
 	return "marshal error on field '" + e.Field + "': " + e.Err.Error()
 }
 
-type UnsupportedTypeErr struct {
+type FieldTypeError struct {
 	Field string
 	Kind  reflect.Kind
 }
 
-func (e *UnsupportedTypeErr) Error() string {
-	return "unsupported type on field " + e.Field + "': " + e.Kind.String()
+func (e *FieldTypeError) Error() string {
+	return "unsupported type on field '" + e.Field + "': " + e.Kind.String()
 }
 
-var (
-	ErrNotStructPtr = fmt.Errorf("not a struct pointer")
-	ErrNotStruct    = fmt.Errorf("not a struct")
-	ErrSelfRefPtr   = fmt.Errorf("self-referential pointer")
-)
+type ResourceTypeError struct {
+	Type reflect.Type
+}
+
+func (e *ResourceTypeError) Error() string {
+	if e.Type != nil {
+		return "unsupported resource type: " + e.Type.Name()
+	}
+	return "unsupported resource type: nil"
+}
+
+type IllegalUnmarshalError struct {
+	Value reflect.Value
+}
+
+func (e *IllegalUnmarshalError) Error() string {
+	if e.Value.IsValid() {
+		return "non-pointer: " + e.Value.Type().Name()
+	}
+	return "nil"
+}
+
+type SelfReferentialPointerError struct {
+	Value reflect.Value
+}
+
+func (e *SelfReferentialPointerError) Error() string {
+	return "self-referential pointer: " + e.Value.String()
+}
 
 type ResourceUnmarshaler interface {
 	UnmarshalJsonApiResource([]byte) error
@@ -219,19 +243,13 @@ func MarshalResource(a any, opts ...marshalResourceOpt) ([]byte, error) {
 		marshalOpts = opt(marshalOpts)
 	}
 
-	v := reflect.ValueOf(a)
-
-	v, err := derefInput(v, resourceMarshalerType)
+	v, err := derefInput(reflect.ValueOf(a), resourceMarshalerType)
 	if err != nil {
-		return nil, fmt.Errorf("jsonapi: dereferencing input: %w", err)
+		return nil, err
 	}
 
 	if v.Type().Implements(resourceMarshalerType) {
 		return v.Interface().(ResourceMarshaler).MarshalJsonApiResource()
-	}
-
-	if v.Type().Kind() != reflect.Struct {
-		return nil, ErrNotStruct
 	}
 
 	r, err := format(a, v, marshalOpts)
@@ -293,7 +311,7 @@ func marshalField(v reflect.Value, r *resource, f field) error {
 
 	j, err := marshalJson(v, f.tag.quote)
 	if err != nil {
-		return &MarshalErr{f.tag.name, err}
+		return &MarshalError{f.tag.name, err}
 	}
 
 	switch f.tag.typ {
@@ -313,13 +331,7 @@ func marshalField(v reflect.Value, r *resource, f field) error {
 }
 
 func UnmarshalResource(data []byte, a any) error {
-	v := reflect.ValueOf(a)
-
-	if v.Kind() != reflect.Pointer {
-		return ErrNotStructPtr
-	}
-
-	v, err := derefInput(v, resourceUnmarshalerType)
+	v, err := derefUnmarshalInput(a)
 	if err != nil {
 		return fmt.Errorf("jsonapi: dereferencing input: %w", err)
 	}
@@ -328,16 +340,21 @@ func UnmarshalResource(data []byte, a any) error {
 		return v.Interface().(ResourceUnmarshaler).UnmarshalJsonApiResource(data)
 	}
 
-	if v.Type().Kind() != reflect.Struct {
-		return ErrNotStructPtr
-	}
-
 	r := newResource()
 	if err := json.Unmarshal(data, &r); err != nil {
 		return fmt.Errorf("jsonapi: unmarshaling resource: %w", err)
 	}
 
 	return deformat(v, r)
+}
+
+func derefUnmarshalInput(a any) (reflect.Value, error) {
+	v := reflect.ValueOf(a)
+	if !v.IsValid() || v.Kind() != reflect.Pointer {
+		return reflect.Value{}, &IllegalUnmarshalError{Value: v}
+	}
+
+	return derefInput(v, resourceUnmarshalerType)
 }
 
 func deformat(v reflect.Value, r resource) error {
@@ -383,7 +400,7 @@ func unmarshalField(v reflect.Value, r *resource, f field) error {
 	}
 
 	if err := unmarshalJson(j, v, f.tag.quote); err != nil {
-		return &UnmarshalErr{f.tag.name, err}
+		return &UnmarshalError{f.tag.name, err}
 	}
 	return nil
 }
@@ -605,7 +622,7 @@ func parseTag(f reflect.StructField, typ, opts string) (tag, error) {
 	k := derefType(f.Type).Kind()
 	switch k {
 	case reflect.Func, reflect.Chan, reflect.Complex64, reflect.Complex128:
-		return tag{}, &UnsupportedTypeErr{Field: f.Name, Kind: k}
+		return tag{}, &FieldTypeError{Field: f.Name, Kind: k}
 	}
 
 	switch typ {
@@ -620,7 +637,7 @@ func parseTag(f reflect.StructField, typ, opts string) (tag, error) {
 	case TagValueLink:
 		return parseLinkTag(f, opts)
 	default:
-		return tag{}, &TagErr{f.Name, errors.New("unknown tag type: " + typ)}
+		return tag{}, &TagError{f.Name, errors.New("unknown tag type: " + typ)}
 	}
 }
 
@@ -659,7 +676,7 @@ type tag struct {
 func parseIdTag(f reflect.StructField, opts string) (tag, error) {
 	rscType, opts := splitFirstAndOpts(opts)
 	if rscType == "" {
-		return tag{}, &TagErr{f.Name, fmt.Errorf("required: type")}
+		return tag{}, &TagError{f.Name, fmt.Errorf("required: type")}
 	}
 
 	omitempty, quote := optFlags(opts)
@@ -691,7 +708,7 @@ func parseRelTag(f reflect.StructField, opts string) (tag, error) {
 	name, namePrec, opts := splitNameAndOpts(f, opts)
 	rscType, opts := splitFirstAndOpts(opts)
 	if rscType == "" {
-		return tag{}, &TagErr{f.Name, fmt.Errorf("required: type")}
+		return tag{}, &TagError{f.Name, fmt.Errorf("required: type")}
 	}
 
 	omitempty, quote := optFlags(opts)
@@ -731,7 +748,7 @@ func marshalRel(v reflect.Value, r *resource, f field) error {
 func marshalToOneRel(v reflect.Value, r *resource, f field) error {
 	j, err := marshalJson(v, f.tag.quote)
 	if err != nil {
-		return &MarshalErr{f.tag.name, err}
+		return &MarshalError{f.tag.name, err}
 	}
 
 	r.ToOneRelationships[f.tag.name] = &toOneRelationship{
@@ -756,7 +773,7 @@ func marshalToManyRel(v reflect.Value, r *resource, f field) error {
 
 		j, err := marshalJson(vi, f.tag.quote)
 		if err != nil {
-			return &MarshalErr{f.tag.name, err}
+			return &MarshalError{f.tag.name, err}
 		}
 
 		r.ToManyRelationships[f.tag.name].Data[i] = resourceIdentifier{
@@ -796,7 +813,7 @@ func unmarshalToOneRel(v reflect.Value, r *resource, f field) error {
 	}
 
 	if err := unmarshalJson(rel.Data.Id, v, f.tag.quote); err != nil {
-		return &UnmarshalErr{f.tag.name, err}
+		return &UnmarshalError{f.tag.name, err}
 	}
 	return nil
 }
@@ -822,7 +839,7 @@ func unmarshalToManyRel(v reflect.Value, r *resource, f field) error {
 		elem := v.Index(i)
 		initValue(elem)
 		if err := unmarshalJson(rel.Id, elem, f.tag.quote); err != nil {
-			return &UnmarshalErr{f.tag.name, err}
+			return &UnmarshalError{f.tag.name, err}
 		}
 	}
 
@@ -928,7 +945,7 @@ func optFlags(opts string) (bool, bool) {
 // marshalJson marshals the value represented by v to raw json.
 func marshalJson(v reflect.Value, quote bool) (json.RawMessage, error) {
 	if !v.IsValid() {
-		return NullJson, nil
+		return nullJson, nil
 	}
 	jsonBts, err := json.Marshal(v.Interface())
 	if err != nil {
@@ -1011,7 +1028,7 @@ func unmarshalJson(data json.RawMessage, v reflect.Value, quote bool) error {
 		}
 		v.Set(reflect.ValueOf(s).Elem())
 	default:
-		return &UnsupportedTypeErr{Kind: v.Type().Kind()}
+		return &FieldTypeError{Kind: v.Type().Kind()}
 	}
 
 	return nil
@@ -1050,21 +1067,31 @@ func isEmpty(v reflect.Value) bool {
 }
 
 // derefInput returns either:
-// - the underlying value of v, found by following all pointers, or
+// - the underlying value of v, found by following all pointers and interfaces, or
 // - an instance of type t, if one of the dereferenced values implements it.
-// An error is returned if a loop of self-referential pointers is found.
+// An error is returned if:
+// - any nil values are encountered, or
+// - a loop of self-referential pointers is found.
 func derefInput(v reflect.Value, t reflect.Type) (reflect.Value, error) {
 	path := map[unsafe.Pointer]bool{}
 	for {
-		if v.Type().Implements(t) || (v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface) {
+		if !v.IsValid() || (v.Kind() == reflect.Pointer && v.IsNil()) {
+			return reflect.Value{}, &ResourceTypeError{Type: nil}
+		}
+
+		if v.Kind() == reflect.Struct || v.Type().Implements(t) {
 			return v, nil
+		}
+
+		if v.Kind() != reflect.Pointer && v.Kind() != reflect.Interface {
+			return reflect.Value{}, &ResourceTypeError{Type: v.Type()}
 		}
 
 		// check for a loop of self-referential pointers
 		if v.Kind() == reflect.Pointer {
 			ptr := v.UnsafePointer()
 			if path[ptr] {
-				return reflect.Value{}, ErrSelfRefPtr
+				return reflect.Value{}, &SelfReferentialPointerError{Value: v}
 			}
 			path[ptr] = true
 		}
@@ -1158,7 +1185,7 @@ func derefValue(v reflect.Value) (reflect.Value, error) {
 		if v.Kind() == reflect.Pointer {
 			ptr := v.UnsafePointer()
 			if path[ptr] {
-				return reflect.Value{}, ErrSelfRefPtr
+				return reflect.Value{}, &SelfReferentialPointerError{Value: v}
 			}
 			path[ptr] = true
 		}

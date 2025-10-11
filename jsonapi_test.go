@@ -2293,7 +2293,7 @@ func TestUnmarshalResource_AnonymousIface_Value(t *testing.T) {
 	}
 
 	err := UnmarshalResource([]byte(anonymousIfaceJson), &got)
-	assert.ErrorAs(t, err, addrOf(&UnmarshalErr{}))
+	assert.ErrorAs(t, err, addrOf(&UnmarshalError{}))
 }
 
 var unsupportedTypes = []any{
@@ -2364,7 +2364,7 @@ func TestMarshalResource_UnsupportedTypes(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			bts, err := MarshalResource(tc)
 			assert.Nil(t, bts)
-			assert.ErrorAs(t, err, addrOf(&UnsupportedTypeErr{}))
+			assert.ErrorAs(t, err, addrOf(&FieldTypeError{}))
 		})
 	}
 }
@@ -2374,38 +2374,57 @@ func TestUnmarshalResource_UnsupportedTypes(t *testing.T) {
 	for _, tc := range unsupportedTypes {
 		t.Run("", func(t *testing.T) {
 			err := UnmarshalResource(data, &tc)
-			assert.ErrorAs(t, err, addrOf(&UnsupportedTypeErr{}))
+			assert.ErrorAs(t, err, addrOf(&FieldTypeError{}))
 		})
 	}
 }
 
-func TestMarshalResource_InputErr(t *testing.T) {
-	data, err := MarshalResource(0)
-	assert.Empty(t, data)
-	assert.ErrorIs(t, err, ErrNotStruct)
+func TestMarshalResource_InputTypeErr(t *testing.T) {
+	for _, tc := range []any{0, addrOf(0), nil, addrOf[any](nil)} {
+		t.Run("", func(t *testing.T) {
+			data, err := MarshalResource(tc)
+			assert.Empty(t, data)
+			assert.ErrorAs(t, err, addrOf(&ResourceTypeError{}))
+		})
+	}
 }
 
 func TestUnmarshalResource_InputTypeErr(t *testing.T) {
-	type tp struct {
-		Int int `jsonapi:"attr,int"`
-	}
-
 	type testCase struct {
-		In       any
-		Expected error
+		In   any
+		Want error
 	}
 
 	testCases := []testCase{
-		{0, ErrNotStructPtr},
-		{addrOf(0), ErrNotStructPtr},
-		{tp{}, ErrNotStructPtr},
+		{
+			In:   addrOf(0),
+			Want: &ResourceTypeError{},
+		},
+		{
+			In:   addrOf[any](nil),
+			Want: &ResourceTypeError{},
+		},
+		{
+			In:   0,
+			Want: &IllegalUnmarshalError{},
+		},
+		{
+			In: struct {
+				Int int `jsonapi:"attr,int"`
+			}{},
+			Want: &IllegalUnmarshalError{},
+		},
+		{
+			In:   nil,
+			Want: &IllegalUnmarshalError{},
+		},
 	}
 
 	jsonData := []byte("{}")
 	for _, tc := range testCases {
 		t.Run("", func(t *testing.T) {
 			err := UnmarshalResource(jsonData, tc.In)
-			assert.ErrorIs(t, err, tc.Expected)
+			assert.ErrorAs(t, err, addrOf(tc.Want))
 		})
 	}
 }
@@ -2417,7 +2436,7 @@ func TestMarshalResource_UnknownTagType(t *testing.T) {
 
 	data, err := MarshalResource(&tp{})
 	assert.Empty(t, data)
-	assert.ErrorAs(t, err, addrOf(&TagErr{}))
+	assert.ErrorAs(t, err, addrOf(&TagError{}))
 }
 
 type ifaceFields struct {
@@ -2513,7 +2532,7 @@ func TestMarshalResource_SelfRefPtr(t *testing.T) {
 	in.A = &p
 
 	_, err := MarshalResource(&in)
-	assert.ErrorIs(t, err, ErrSelfRefPtr)
+	assert.ErrorAs(t, err, addrOf(&SelfReferentialPointerError{}))
 }
 
 func TestUnmarshalResource_SelfRefPtr(t *testing.T) {
@@ -2557,7 +2576,7 @@ func TestMarshalResource_AnonymousSelfRefPtr(t *testing.T) {
 	in.I = &p
 
 	_, err := MarshalResource(&in)
-	assert.ErrorIs(t, err, ErrSelfRefPtr)
+	assert.ErrorAs(t, err, addrOf(&SelfReferentialPointerError{}))
 }
 
 func TestUnmarshalResource_AnonymousSelfRefPtr(t *testing.T) {
@@ -3022,7 +3041,7 @@ func TestDerefValue(t *testing.T) {
 		t.Run("", func(t *testing.T) {
 			got, err := derefValue(reflect.ValueOf(tc.In))
 			if tc.ExpErr {
-				assert.Equal(t, ErrSelfRefPtr, err)
+				assert.ErrorAs(t, err, addrOf(&SelfReferentialPointerError{}))
 				return
 			} else if err != nil {
 				t.Fatal(err)
