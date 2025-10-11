@@ -153,7 +153,7 @@ func applyMarshalOpts(a any, r resource, opts marshalResourceOpts) error {
 		for name, link := range links {
 			l, err := json.Marshal(link)
 			if err != nil {
-				return &MarshalErr{Field: name, Err: err}
+				return &MarshalError{Field: name, Err: err}
 			}
 			r.Links[name] = l
 		}
@@ -198,7 +198,7 @@ func formatMap[A any](m map[string]A) (map[string]json.RawMessage, error) {
 	for k, v := range m {
 		f, err := json.Marshal(v)
 		if err != nil {
-			return nil, &MarshalErr{Field: k, Err: err}
+			return nil, &MarshalError{Field: k, Err: err}
 		}
 		formatted[k] = f
 	}
