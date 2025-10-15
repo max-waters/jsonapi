@@ -1,4 +1,7 @@
 // Package jsonapi marshals and unmarshals JSON:API v1.1 formatted JSON.
+// The mapping between JSON:API values and Go values is defined with
+// struct tags, which can be overridden with custom marshalling and unmarshaling
+// functions.
 package jsonapi
 
 import (
@@ -264,52 +267,58 @@ func (r *resource) UnmarshalJSON(data []byte) error {
 // function is called.
 //
 // Otherwise, the encoding of each of a's struct fields is defined by the the "jsonapi" key
-// in the field's tag.
+// in the field's tag. The following formats are accepted:
+//
+//   - "id,<type-name>[,<opt1>[,<opt2>]]": field is encoded as the resource type and id.
+//   - "attr[,<name>[,<opt1>[,opt2]]]": field is be encoded as an attribute.
+//   - "rel,<name>,<type-name>[,<opt1>[,<opt2>]]": field is encoded as a related resource id.
+//   - "link[,<name>[,<opt1>[,opt2]]]": field is encoded as a link.
+//   - "meta[,<name>[,<opt1>[,opt2]]]": field is encoded as a metadata item.
+//   - "-": field is ignored.
+//
 // The tag's first element specifies the field's destination in the
-// resource, and must be either `id`, `attr`, `rel`, `meta`, `link` or `-`.
-// An `id` specification must be followed by a type (eg `jsonapi:"id,my-type"`),
-// a `rel` specification must be followed by a name and type (eg `jsonapi:"rel,my-name,my-type"`),
-// and the `attr`, `meta` and `link` specifications may be followed by a name (eg `jsonapi:"attr,my-name"`).
-// The `-` specification indicates that the field should be ignored.
+// resource, and must be either "id", "attr", "rel", "meta", "link" or "-".
+// The "id" specification must be followed by a type,
+// a "rel" specification must be followed by a name and type,
+// and the "attr", "meta" and "link" specifications may be followed by a name.
+// A field with no tag defaults to attr, and an empty or unspecified name will default to the field name.
 //
-// A field with no tag defaults to `attr`, and an empty or unspecified name will default to the field name.
-// Fields can be excluded
+// The following options are supported:
 //
-// All specifications can then be followed by a comma-separated list of options.
-// The "omitempty" option specifies that the field should be omitted
-// from the Resource if the field has an empty value, as in the encoding/json
-// package.
+//   - "omitempty" specifies that the field should be omitted
+//     from the Resource if the field has an empty value, as in the encoding/json
+//     package.
 //
-// The "string" option signals that a floating point, integer, or boolean
-// type should be encoded as a string. This is useful for using int or UUID
-// fields as resource IDs.
+//   - "string" signals that a floating point, integer, or boolean
+//     type should be encoded as a string. This is useful for using int or UUID
+//     fields as resource IDs.
 //
 // Some struct tag examples:
 //
-// // Field appears as the `id` field, converted to a string.
-// // Additionally, a `type` field will be added with value `my-type`.
-// Field int `jsonapi:"id,my-type,string"`
+//	// Field appears as the `id` field, converted to a string.
+//	// Additionally, a `type` field will be added with value `my-type`.
+//	Field int `jsonapi:"id,my-type,string"`
 //
-// // Field appears as an attribute with name `my-name`.
-// Field int `jsonapi:"attr,my-name,omitempty"`
+//	// Field appears as an attribute with name `my-name`.
+//	Field int `jsonapi:"attr,my-name,omitempty"`
 //
-// Field appears as an attribute with name `my-name`.
-// Field int `json:"my-name"`
+//	// Field appears as an attribute with name `my-name`.
+//	Field int `json:"my-name"`
 //
-// Field is excluded from the resource entirely:
-// Field int `jsonapi:"-"`
+//	// Field is excluded from the resource entirely:
+//	Field int `jsonapi:"-"`
 //
-// // Field appears as the "id" of a to-one relationship, with name `my-name`, and type `my-type`.
-// Field int `jsonapi:"attr,my-name,my-type,string"`
+//	// Field appears as the "id" of a to-one relationship, with name `my-name`, and type `my-type`.
+//	Field int `jsonapi:"attr,my-name,my-type,string"`
 //
-// // Field elements appear as the "id" fields of a to-many relationship, with name `my-name`, and type `my-type`.
-// Field []int `jsonapi:"attr,my-name,my-type,string"`
+//	// Field elements appear as the "id" fields of a to-many relationship, with name `my-name`, and type `my-type`.
+//	Field []int `jsonapi:"attr,my-name,my-type,string"`
 //
-// // Field appears as an meta item with name `my-name`.
-// Field int `jsonapi:"meta,my-name"`
+//	// Field appears as an meta item with name `my-name`.
+//	Field int `jsonapi:"meta,my-name"`
 //
-// // Field appears as a link with name `my-name`.
-// Field int `jsonapi:"link,my-name"`
+//	// Field appears as a link with name `my-name`.
+//	Field int `jsonapi:"link,my-name"`
 //
 // Embedded struct fields without a jsonapi tag are marshaled as if their inner exported fields
 // were fields in the outer struct, subject to the same visibility rules defined in
