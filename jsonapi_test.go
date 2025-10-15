@@ -2011,6 +2011,45 @@ func TestMarshalResource_AnonymousUnexportedExportedField(t *testing.T) {
 	assert.Equal(t, fmtJson(t, []byte(anonWithExpJson)), fmtJson(t, got))
 }
 
+type AnonymousAttribute struct {
+	Int int `json:"int"`
+}
+
+type AnonymousTagged struct {
+	AnonymousAttribute `jsonapi:"attr,anon"`
+}
+
+var anonAttributeVal = AnonymousTagged{
+	AnonymousAttribute: AnonymousAttribute{
+		Int: 2,
+	},
+}
+
+const anonAttributeJson = `
+{
+	"attributes": {
+		"anon": {
+			"int": 2
+		}
+	}
+}`
+
+func TestMarshalResource_AnonymousTagged(t *testing.T) {
+	got, err := MarshalResource(anonAttributeVal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, fmtJson(t, []byte(anonAttributeJson)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_AnonymousTagged(t *testing.T) {
+	got := AnonymousTagged{}
+	if err := UnmarshalResource([]byte(anonAttributeJson), &got); err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, anonAttributeVal, got)
+}
+
 func TestUnmarshalResource_AnonymousUnexportedExportedField(t *testing.T) {
 	got := anonUnexpExp{}
 	if err := UnmarshalResource([]byte(anonWithExpJson), &got); err != nil {
