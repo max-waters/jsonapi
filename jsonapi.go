@@ -952,10 +952,10 @@ func unmarshalToManyRel(v reflect.Value, r *resource, f field) error {
 }
 
 // isToOne returns whether the supplied value represents a to-one or
-// to-many relationship. A to-many relationship must be an array, or a slice
+// to-many relationship. A to-many relationship must be an array or slice
 // of anything that is not a byte.
 func isToOne(fv reflect.Value) bool {
-	return fv.Kind() != reflect.Array && (fv.Kind() != reflect.Slice || fv.Type().Elem().Kind() == reflect.Uint8)
+	return (fv.Kind() != reflect.Array && fv.Kind() != reflect.Slice) || fv.Type().Elem().Kind() == reflect.Uint8
 }
 
 // parseMetaTag parses a meta tag, eg `jsonapi:"meta,name,opt1,opt2..."`

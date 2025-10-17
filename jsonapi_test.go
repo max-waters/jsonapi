@@ -579,7 +579,8 @@ var relsPrimitiveValue = relsPrimitive{
 	Int:  -1, Int8: -2, Int16: -3, Int32: -4, Int64: -5,
 	Uint: 6, Uint8: 7, Uint16: 8, Uint32: 9, Uint64: 10,
 	Float32: 11.32, Float64: 12.64,
-	String: "str-13", Rune: -14, Byte: 15, SliceByte: []byte("bts-16"),
+	String: "str-13", Rune: -14,
+	Byte: 15, SliceByte: []byte("bts-16"),
 }
 
 const relsPrimitiveJson = `
@@ -813,6 +814,54 @@ func TestUnmarshalResource_ToOneRel_CompositePtr(t *testing.T) {
 	}
 
 	assert.Equal(t, relsCompositePtrValue, got)
+}
+
+type byteArrAlias [2]byte
+
+func (a byteArrAlias) MarshalJSON() ([]byte, error) {
+	return []byte{'"', a[0], a[1], '"'}, nil
+}
+
+func (a byteArrAlias) UnmarshalJSON(data []byte) error {
+	a[0] = data[1]
+	a[1] = data[2]
+	return nil
+}
+
+type relByteArrAlias struct {
+	BtArr byteArrAlias `jsonapi:"rel,byte-arr,type"`
+}
+
+var byteArrAliasVal = &relByteArrAlias{BtArr: [2]byte{'1', '2'}}
+
+const byteArrAliasJson = `
+{
+    "relationships": {
+        "byte-arr": {
+            "data": {
+                "id": "12",
+                "type": "type"
+            }
+        }
+    }
+}
+`
+
+func TestMarshalResource_ToOne_ByteArray(t *testing.T) {
+	got, err := MarshalResource(byteArrAliasVal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, fmtJson(t, []byte(byteArrAliasJson)), fmtJson(t, got))
+}
+
+func TestUnmarshalResource_ToOne_ByteArray(t *testing.T) {
+	got := &relByteArrAlias{}
+	err := UnmarshalResource([]byte(byteArrAliasJson), byteArrAliasVal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, byteArrAliasVal, got)
 }
 
 // to-many relations of all primitive types
@@ -3086,6 +3135,29 @@ func TestDerefValue(t *testing.T) {
 				t.Fatal(err)
 			}
 			assert.Equal(t, tc.Exp, got.Interface())
+		})
+	}
+}
+
+func TestIsToOne(t *testing.T) {
+	type byteSliceAlias []byte
+	type byteArrayAlias [3]byte
+
+	type testCase struct {
+		In   any
+		Want bool
+	}
+
+	testCases := []testCase{
+		{In: 1, Want: true},
+		{In: []int{1, 2}, Want: false},
+		{In: byteSliceAlias([]byte("")), Want: true},
+		{In: byteArrayAlias([]byte("123")), Want: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("%v", tc.In), func(t *testing.T) {
+			assert.Equal(t, tc.Want, isToOne(reflect.ValueOf(tc.In)))
 		})
 	}
 }
