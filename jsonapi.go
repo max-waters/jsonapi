@@ -19,18 +19,18 @@ import (
 
 const (
 	// tag keys
-	TagKeyJson    = "json"
-	TagKeyJsonApi = "jsonapi"
+	tagKeyJson    = "json"
+	tagKeyJsonApi = "jsonapi"
 	// tag values
-	TagValueIgnore = "-"
-	TagValueId     = "id"
-	TagValueAttr   = "attr"
-	TagValueRel    = "rel"
-	TagValueMeta   = "meta"
-	TagValueLink   = "link"
+	tagValueIgnore = "-"
+	tagValueId     = "id"
+	tagValueAttr   = "attr"
+	tagValueRel    = "rel"
+	tagValueMeta   = "meta"
+	tagValueLink   = "link"
 	// options
-	TagValueOmitEmpty = "omitempty"
-	TagValueString    = "string"
+	tagValueOmitEmpty = "omitempty"
+	tagValueString    = "string"
 )
 
 var nullJson = json.RawMessage([]byte("null"))
@@ -379,11 +379,11 @@ func format(a any, v reflect.Value, opts marshalResourceOpts) (resource, error) 
 }
 
 func marshalField(v reflect.Value, r *resource, f field) error {
-	if f.tag.typ == TagValueRel {
+	if f.tag.typ == tagValueRel {
 		return marshalRel(v, r, f)
 	}
 
-	if f.tag.typ == TagValueId {
+	if f.tag.typ == tagValueId {
 		r.Type = f.tag.rscType
 	}
 
@@ -407,13 +407,13 @@ func marshalField(v reflect.Value, r *resource, f field) error {
 	}
 
 	switch f.tag.typ {
-	case TagValueId:
+	case tagValueId:
 		r.resourceIdentifier.Id = j
-	case TagValueAttr:
+	case tagValueAttr:
 		r.Attributes[f.tag.name] = j
-	case TagValueMeta:
+	case tagValueMeta:
 		r.Meta[f.tag.name] = j
-	case TagValueLink:
+	case tagValueLink:
 		r.Links[f.tag.name] = j
 	default:
 		return errors.New("unknown tag type " + f.tag.typ)
@@ -477,19 +477,19 @@ func deformat(v reflect.Value, r resource) error {
 }
 
 func unmarshalField(v reflect.Value, r *resource, f field) error {
-	if f.tag.typ == TagValueRel {
+	if f.tag.typ == tagValueRel {
 		return unmarshalRel(v, r, f)
 	}
 
 	var j json.RawMessage
 	switch f.tag.typ {
-	case TagValueId:
+	case tagValueId:
 		j = r.resourceIdentifier.Id
-	case TagValueAttr:
+	case tagValueAttr:
 		j = r.Attributes[f.tag.name]
-	case TagValueMeta:
+	case tagValueMeta:
 		j = r.Meta[f.tag.name]
-	case TagValueLink:
+	case tagValueLink:
 		j = r.Links[f.tag.name]
 	default:
 		return errors.New("unknown tag type " + f.tag.typ)
@@ -574,7 +574,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 
 				typ, opts, ok := splitTypeAndOpts(f)
 
-				if typ == TagValueIgnore {
+				if typ == tagValueIgnore {
 					continue
 				}
 
@@ -623,7 +623,7 @@ func parseTags(v reflect.Value) ([]field, error) {
 						continue
 					}
 
-					typ = TagValueAttr
+					typ = tagValueAttr
 				}
 
 				tag, err := parseTag(f, typ, opts)
@@ -731,15 +731,15 @@ func parseTag(f reflect.StructField, typ, opts string) (tag, error) {
 	}
 
 	switch typ {
-	case TagValueId:
+	case tagValueId:
 		return parseIdTag(f, opts)
-	case TagValueAttr:
+	case tagValueAttr:
 		return parseAttrTag(f, opts)
-	case TagValueMeta:
+	case tagValueMeta:
 		return parseMetaTag(f, opts)
-	case TagValueRel:
+	case tagValueRel:
 		return parseRelTag(f, opts)
-	case TagValueLink:
+	case tagValueLink:
 		return parseLinkTag(f, opts)
 	default:
 		return tag{}, &TagError{f.Name, errors.New("unknown tag type: " + typ)}
@@ -787,7 +787,7 @@ func parseIdTag(f reflect.StructField, opts string) (tag, error) {
 	omitempty, quote := optFlags(opts)
 
 	return tag{
-		typ:       TagValueId,
+		typ:       tagValueId,
 		rscType:   rscType,
 		omitempty: omitempty,
 		quote:     quote,
@@ -800,7 +800,7 @@ func parseAttrTag(f reflect.StructField, opts string) (tag, error) {
 	omitempty, quote := optFlags(opts)
 
 	return tag{
-		typ:       TagValueAttr,
+		typ:       tagValueAttr,
 		name:      name,
 		namePrec:  namePrec,
 		omitempty: omitempty,
@@ -819,7 +819,7 @@ func parseRelTag(f reflect.StructField, opts string) (tag, error) {
 	omitempty, quote := optFlags(opts)
 
 	return tag{
-		typ:       TagValueRel,
+		typ:       tagValueRel,
 		name:      name,
 		namePrec:  namePrec,
 		rscType:   rscType,
@@ -964,7 +964,7 @@ func parseMetaTag(f reflect.StructField, opts string) (tag, error) {
 	omitempty, quote := optFlags(opts)
 
 	return tag{
-		typ:       TagValueMeta,
+		typ:       tagValueMeta,
 		name:      name,
 		namePrec:  namePrec,
 		omitempty: omitempty,
@@ -978,7 +978,7 @@ func parseLinkTag(f reflect.StructField, opts string) (tag, error) {
 	omitempty, quote := optFlags(opts)
 
 	return tag{
-		typ:       TagValueLink,
+		typ:       tagValueLink,
 		name:      name,
 		namePrec:  namePrec,
 		omitempty: omitempty,
@@ -991,7 +991,7 @@ func parseLinkTag(f reflect.StructField, opts string) (tag, error) {
 // whether a tag was found.
 // Eg `jsonapi:"attr,name,omitempty"` returns ("attribute", "name,omitempty", true )
 func splitTypeAndOpts(f reflect.StructField) (string, string, bool) {
-	value, ok := f.Tag.Lookup(TagKeyJsonApi)
+	value, ok := f.Tag.Lookup(tagKeyJsonApi)
 	if !ok {
 		return "", "", false
 	}
@@ -1014,7 +1014,7 @@ func splitNameAndOpts(f reflect.StructField, opts string) (string, int, string) 
 		return name, 3, opts
 	}
 
-	name, _, _ = strings.Cut(f.Tag.Get(TagKeyJson), ",")
+	name, _, _ = strings.Cut(f.Tag.Get(tagKeyJson), ",")
 	if name != "" {
 		return name, 2, opts
 	}
@@ -1037,9 +1037,9 @@ func optFlags(opts string) (bool, bool) {
 	for opts != "" {
 		opt, rest, _ := strings.Cut(opts, ",")
 		switch opt {
-		case TagValueOmitEmpty:
+		case tagValueOmitEmpty:
 			omitempty = true
-		case TagValueString:
+		case tagValueString:
 			quote = true
 		}
 		opts = rest
